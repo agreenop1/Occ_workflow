@@ -17,12 +17,12 @@ library(jagsUI)
 
 source("Process_output/combine_chain.R")
 
-file.path = paste0("Jasmin_outputs/mod.spi.B.all_C.","CID","_ID_","UID",".rdata")
-out <- comb_daisy(parameters=c("beta","deviance"),iter.index=1,chain.index=1:3,file.path=file.path,by.it=100,iterations=100,verbose=T)
+file.path = paste0("Jasmin_outputs/", "bee.B.all_C.","CID","_run.rdata")
+out <- comb_daisy(parameters=c("beta","deviance"),iter.index=1,chain.index=1:3,file.path=file.path,by.it=500,iterations=500,verbose=T)
 output <- summary_chains(out,comb.chain = T,keep.samples = T)
 plot(output,"mu.beta[1]")
 
-
+print(output)
 
 
 # mod output

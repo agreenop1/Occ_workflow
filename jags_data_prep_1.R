@@ -392,4 +392,3 @@ cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,
 saveRDS(list(occup,visit,zobs,covars,closure.period,cr,cr_exc),file.name)
 
 
-
