@@ -8,17 +8,19 @@ i <- as.numeric(commandArgs(trailingOnly = TRUE))[1]
 library(rjags)
 library(R2jags)
 set.seed(i)
+
 # Starting JAGS object
 # output files
 rdataFile=paste0("Model_outputs/spi.B.all_C.",i,"_run",".rdata")
 save.dir="/gws/nopw/j04/ceh_generic/arrgre/sumRQenv/spi.B.all"
 
 
-
 load(rdataFile) # file name
 
 # run it = iterations each run; adapt = adaptive iterations; total it = max number of iterations; thinning factor
-# save it = how often should iterations be saved
+# save it = how often should iterations be saved - use to control memory + wall time (note model
+# is not recompiled here)
+
 by.it = 4000; adapt=100 ; total.it = 20000; n.thin = 5; save.it=500
 
 # recompile the object

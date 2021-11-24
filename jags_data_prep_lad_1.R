@@ -28,7 +28,7 @@ closure.period=2
 lag = T
 
 # group
-occ.dat = readRDS("occurrence_recs/ladybirds.rds")
+occ.dat = readRDS("occurrence_recs/ladybird.rds")
 group.name="ladybirds"
 
 # sites at the 5km resolution  
@@ -69,7 +69,7 @@ rq_sum <-  chem_cov %>% group_by(year,gr,E,N)%>% summarise(predators_RQ=sum(pred
 # need to be in long format with a year and gr column then the variable of interest as var.x below
 
 cov_assess <- c(list(temp_anom=env_cov$temp_anom,mean_temp=env_cov$mean_temp,semi=env_cov$semi), list(RQsum=rq_sum)) # named list of covs
-var.x <- c("mean.x","mean.x","mean.x","pollinators_RQ") # variable of interest CHECK!
+var.x <- c("mean.x","mean.x","mean.x","predators_pollinators_RQ") # variable of interest CHECK!
 
 #################################################################  
 # derive site list  based on common sites in the covariate data and occupancy data

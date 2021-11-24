@@ -9,7 +9,8 @@
 # verbose = T/F output to console
 
 ###############################################################################
-comb_daisy <- function(parameters=NULL,iter.index,chain.index,file.path,by.it,iterations="all",verbose){
+comb_daisy <- function(parameters=NULL,iter.index,chain.index,file.path,by.it,iterations="all",
+                       summary=T,verbose=T){
   
   library("rjags")
   
@@ -65,14 +66,14 @@ comb_daisy <- function(parameters=NULL,iter.index,chain.index,file.path,by.it,it
       if(verbose){cat("CHAIN",c,"\n")}
       
       for (i in 1:il){
-        if(length(it.index==1)){file.name=gsub("UID",it.index,c.indx)}else{ # read in iteration
-        file.name=gsub("UID",it.index[i],c.indx)} # read in iteration
+        if(length(it.index)==1){file.name.=gsub("UID",it.index,c.indx)}else{ # read in iteration
+        file.name.=gsub("UID",it.index[i],c.indx)} # read in iteration
         
-        if (verbose){print(basename(file.name))}
-        load(file.name)
+        if (verbose){print(basename(file.name.))}
+        load(file.name.)
         
         mods[[i]] <-  out # model object
-        mods[[i]]$file.name <- file.name
+        mods[[i]]$file.name <- file.name.
         
          if(i==1){
           
@@ -90,7 +91,8 @@ comb_daisy <- function(parameters=NULL,iter.index,chain.index,file.path,by.it,it
               }else{ 
               samp <- jagsUI:::bind.mcmc(samp,mods[[i]]$samples[,vars,drop=T],start=s.tart,n.new.iter=by.it)}
               
-           }
+         }
+        mods[[i]]$samples <- NULL
        }
       
      chains$mods[[c]] <- mods
@@ -107,6 +109,7 @@ comb_daisy <- function(parameters=NULL,iter.index,chain.index,file.path,by.it,it
   
     out<-list(models=chains$mods,samples=chains$samples,n.burnin=t.iter-iterations,n.iter=iterations,thin=thin(chains$samples[[1]]),
               n.chains=length(chain.index),parameters.to.save=parameters.to.save,n.adapt=n.adapt, sufficient.adapt= sufficient.adapt)
+    if(summary==T){summary_chains(out,comb.chain=T,keep.samples = "all")}else{out}
 }    
 ######################################################
 summary_chains <- function(x,comb.chain,keep.samples='all'){

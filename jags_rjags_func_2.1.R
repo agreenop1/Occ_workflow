@@ -165,6 +165,11 @@ jagsG <- function( data, inits,n.adapt,
   
   sufficient.adapt = adapt(m,n.iter=1,end.adaptation)
   
+  if(n.burnin>0){
+    cat(n.burnin, "iterations...","\n")
+    rjags::update.jags(m,n.iter = n.burnin)
+  }
+  
   samples <- coda.samples( model          = m,
                            variable.names = parameters.to.save,
                            n.iter         = ( n.iter - n.burnin ),

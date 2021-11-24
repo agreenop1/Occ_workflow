@@ -1,104 +1,152 @@
+########################################################################
+# 4. Code for handling outputs of dynamics bayesian occupancy models  #
+########################################################################
 library(BRCmap)
 library(dplyr)
 library(ggplot2)
 library(jagsUI)
 library(forcats)
 library(dplyr)
+library(ggmcmc)
 
 # iter.index = UID in file path needs to be related to unique index containing different chunks of the chain (iteration numbers)
 # chain.index = if comb.chain = T chains need to be combined. CID used to identify the different chain in the file path
 # file.path = e.g. paste0("Model_outputs/Mod_sumRQ_500_C.","CID","_ID_","UID",".rdata")
 # by.it = number of increases in iterations in each file
-# thin = thin rate
 # iterations = iterations to be used
-# comb.chain = T/F combining chains run in parallel
 # verbose = T/F output to console
-library(jagsUI)
-
-source("Process_output/combine_chain.R")
-
-file.path = paste0("Jasmin_outputs/", "bee.B.all_C.","CID","_run.rdata")
-out <- comb_daisy(parameters=c("beta","deviance"),iter.index=1,chain.index=1:3,file.path=file.path,by.it=500,iterations=500,verbose=T)
-output <- summary_chains(out,comb.chain = T,keep.samples = T)
-plot(output,"mu.beta[1]")
-
-print(output)
 
 
-# mod output
-mod <- readRDS("ex.mod.rds")
 
-# species level parameters
-eco_params <- list("beta1","beta2")
+source("Occ_workflow/combine_chain_4.1.R")
 
-# site x year parameters
-obs_params <- list("z","phi","psi")
+file.path = paste0("Jasmin_outputs/", "spi.B.all_C.CID_ID_UID.rdata")
+out <- comb_daisy(parameters=c("beta","deviance","gamma",
+                  "init.occ"),iter.index=1,chain.index=2:3,summary=T,file.path=file.path,by.it=1000,iterations=1000,verbose=T)
 
-species <- c("a","b","c") # in order they are in occ dataframe!
+# output <- summary_chains(out,comb.chain = T,keep.samples = F)
 
+# model 
+print(out)
+samples = out$samples
+samp.df <- ggmcmc::ggs(samples)
 
-####################################################################
+# co-variates in order used in model
+covs <- c("Temperature","RQsum","Semi.natural")
+
+# species in order they are in occ dataframe!
+jas_data <- readRDS("Model_data/data_spiders_all.499_1994.2010.rds")
+nspecies <- colnames(jas_data[[1]][-1])
+
+# parameters of interest
+params_jname <- list("beta","mu.beta","deviance","gamma","init.occ")
+
+par <- paste0(params_jname,collapse = "|")
+vars. <- varnames(out$samples)
+vars <- vars.[stringr::str_detect(vars.,par)]
+#
+plots <- function(v1){
+tr <- ggs_traceplot(samp.df[samp.df$Parameter==v1,])+
+  ggtitle(paste(cnames[c],"-",rnames[r],"- rhat =",round(out$Rhat$beta[r,c],2)))
+ds <- ggs_density(samp.df[samp.df$Parameter==v1,])
+coef <- ggs_caterpillar(samp.df[samp.df$Parameter==v1,])+
+  geom_vline(xintercept = 0,linetype="dashed")
+
+ggpubr:: ggarrange(tr,ds,coef)
+}
 # convergence plots & rhat statistics based on selected parameters #
 ####################################################################
-eco_conv_plot <- lapply(eco_params,function(x,y){ recordPlot(plot(y,x))}, y=mod)
-obs_conv_plot <- lapply(obs_params,function(x,y){ recordPlot(plot(y,x))}, y=mod)
+# parameters indexed in matrix e.g. coefficient x species [1,2]
+# rownames in order
+rnames = covs; row.it = length(covs)
+cnames = species; col.it = length(species)
 
-# check convergence
-rhat <- mod$Rhat
+par.plots <- list()
 
-rhat_asses <- function(x,rhat,species, M=F){
-  para <- x[[1]]
-  if (!M){y <- data.frame(matrix(ncol=length(x),nrow=length(species)))
-  } else {y <-  array(dim=c(length(x),ncol(rhat[[para]][1,,])+1,length(species)))}
+for (c in 1:col.it){
   
-  if(!M){
-    for (i in 1:ncol(y)){
-      y[1:nrow(y),i]  <- round(rhat[x[[i]]][[1]],3) 
-      colnames(y)[i] <- x[[i]]
-    }
-    
-    y[,ncol(y)+1]<- apply(y,1,function(x){
-      if(!is.numeric(x)) stop("Not all parameters are numeric")
-      if(all(x<1.05)) "All params converged (rhat < 1.05)"else "At least 1 param did NOT converge (rhat >1.05)"})
-    
-    colnames(y)[ncol(y)] <- "Convergence status"
-    rownames(y)[1:length(species)] <- species
-    y
-    
-  }else{
-    for (i in 1:length(species)){
-      for (k in 1:length(x)){
-        
-        vals <- rhat[[x[[k]]]][i,,]
-        
-        y[k,,i] <- c(x[[k]],round(apply(vals,2,function(x)sum(x<1.05,na.rm=T))/nrow(vals),4)*100)
-        
-      }
-    }
-    y
+  cov <- list()
+  
+  for (r in 1:row.it){
+  v1 <- gsub("r",r,paste0("beta[r,c]"))
+  v1 <- gsub("c",c,v1)
+  
+  cov[[r]] <- plots(v1)
+  names(cov)[r] <- rnames[r]
   }
+
+ gm <- paste0("gamma[",c,"]")    
+ io <- paste0("init.occ[",c,"]") 
+  cov2 <- list(gamma= plots(gm),psi=plots(io))
+par.plots[[c]] <- c(cov,cov2)
+names(par.plots)[c] <- cnames[c]
 }
 
+################################################## 
+hpara <- c("mu.beta","tau.beta")
+var.plots <- list()
 
-# ecology & observation mod rhat statistics
+for (r in 1:row.it){
+  
+  cov <- list()
+  
+  for (i in 1:length(hpara)){
+    v <- hpara[i]
+    v1 <- paste0(v,"[",r,"]")
+    
+    tr <- ggs_traceplot(samp.df[samp.df$Parameter==v1,])+
+      ggtitle(paste(rnames[r],"- rhat =",round(out$Rhat[[v]][r],2)))
+    ds <- ggs_density(samp.df[samp.df$Parameter==v1,])
+    coef <- ggs_caterpillar(samp.df[samp.df$Parameter==v1,])+
+      geom_vline(xintercept = 0,linetype="dashed")
+    
+    p1 <- ggpubr:: ggarrange(tr,ds,coef)
+    cov[[i]] <- p1
+    names(cov)[i] <- hpara[i]
+  }
+  
+ var.plots[[r]] <- cov
+ names(var.plots)[r] <- rnames[r] 
+}
+var.plots
+##
+x <- names(out$Rhat)
 
-rhat_eco <- rhat_asses(eco_params,rhat,species,M=F)
-rhat_s <- rhat_asses(obs_params,rhat,species,M=T)
+rhat <- function(x){
+cat(x,"\n")
+x1 <- out$Rhat[[x]]
+if(is.matrix(x1)){
 
+  x1[x1<1.05] <- "Converged (Rhat < 1.05)"
+  x1[x1!="Converged (Rhat < 1.05)"] <- "Not converged (Rhat > 1.05)"
+  x1 <- t(x1)
+  rownames(x1) <- species
+  colnames(x1) <- covs
+  x1
+}else{
+  x1[x1<1.05] <- "Converged (Rhat < 1.05)"
+  x1[x1!="Converged (Rhat < 1.05)"] <- "Not converged (Rhat > 1.05)"
+  
+  if (length(x1)==length(species)){ names(x1) <- species}
+  if (length(x1)==length(covs)){ names(x1) <- covs}
+  x1
+ }
+}
+c<- lapply(x,rhat)
+names(c) <- x
+c
 #################################################################
 ############# Mean coefficient for each species #################
 #################################################################
-means <- mod$mean
-lb <- mod$q2.5
-ub <- mod$q97.5
+
 
 plot_effects <- function(x,species){
   pdat <- data.frame(matrix (nrow=length(species),ncol=4))
   colnames(pdat) <- c("Species","Mean","Lb","Ub")
   pdat[,1] <- species
-  pdat[,2] <- means[[x]]
-  pdat[,3] <- lb[[x]]
-  pdat[,4] <- ub[[x]]
+  pdat[,2] <- means
+  pdat[,3] <- lb
+  pdat[,4] <- ub
   
   
   ggplot (pdat,aes(x=fct_rev((reorder(Species,Mean))),y=Mean))+ 
@@ -112,87 +160,9 @@ plot_effects <- function(x,species){
                color = "black", size=0.5)+coord_flip()
 }
 
-lapply(eco_params,plot_effects,species=species)
-
-
-##########################################################################
-############### Parameter effects on species persistence #################
-##########################################################################
-sims <- mod$sims.list
-
-# covariate data
-chems <- read.csv("Weight_applied_byChemgroup.csv")
-chems <- split(chems,chems$chemgroup)
-
-x<- chems[[1]]
-
-# parameter values
-FUNG <- seq(min(chems[[1]]$weight_applied),max(chems[[1]]$weight_applied),length.out=100)-mean(chems[[1]]$weight_applied)
-FUIN <- seq(min(chems[[2]]$weight_applied),max(chems[[2]]$weight_applied),length.out=100)-mean(chems[[2]]$weight_applied)
-HERB <- seq(min(chems[[3]]$weight_applied),max(chems[[3]]$weight_applied),length.out=100)-mean(chems[[3]]$weight_applied)
-INSE <- seq(min(chems[[4]]$weight_applied),max(chems[[4]]$weight_applied),length.out=100)-mean(chems[[4]]$weight_applied)
-MOLL <- seq(min(chems[[5]]$weight_applied),max(chems[[5]]$weight_applied),length.out=100)-mean(chems[[5]]$weight_applied)
-
-
-## values for forming predictions
-vari <- data.frame(FUIN, INSE)
-mean_v <- c(mean(chems[[2]]$weight_applied),mean(chems[[4]]$weight_applied))
-betas <- list("beta1","beta2")
-intercept <- "alpha.phi"
-
-spec_vals <- list()
-para_vals <- list()
-
-for (i in 1:ncol(vari)){
-  for (k in 1:length(species)){
-    beta <- betas[[i]]
-    vals <- sapply(vari[,i],function(x) plogis(sims[[intercept]][,k]+ sims[[beta]][,k]*x))
-    means <- colMeans(vals)
-    lb <- apply(vals,2,quantile,probs = 0.025)
-    ub <- apply(vals,2,quantile,probs = 0.975)
-    spec_vals[[k]] <- data.frame(means,lb,ub,vari[,i]+mean_v[[i]],colnames(vari[i]),species[[k]])
-  }
-  para_vals[[i]] <- spec_vals
-}
-
-
-spec_effs <- lapply(para_vals,
-                    function(x)lapply(x,
-                                      function(x) ggplot(data=data.frame(x)) +  
-                                        geom_ribbon(aes(ymin=ub,ymax=lb,x=x[,4]),alpha=0.4)+ 
-                                        geom_line(aes(x=x[,4],y=means))+
-                                        xlab(paste(x[1,5],"weight"))+ylab("Persistence")))
-
-spec_effs[[2]]
-
-##########################################################################
-############### Parameter effects across England #########################
-##########################################################################
-covar <- readRDS("chems_W_SID.csv")
-psi <- mod$sims.list["psi"]
-
-var.x <- "Insecticide"
-
-dat.x  <- covar[[var.x]]
-var_mean <- data.frame((colMeans(covar[[var.x]][,-1],na.rm = T)))
-colnames(var_mean)[1] <- c("mean")
-var_mean$year  <- rownames(var_mean)
-var_mean <- var_mean[order(var_mean$mean),]
-min.x <- var_mean[1,2]
-max.x <- var_mean[nrow(var_mean),2]
-
-x.map <- cbind(dat.x$gr, dat.x[[min.x]]/dat.x[[max.x]])
-y.map <- 
-  
-  
-  ggplot() +
-  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
-  ylim(0, 700000)  + geom_tile(data = filter(p, year == "1994"), 
-                               aes(x = E, y = N, fill = weight_applied))+
-  scale_fill_continuous(type = "viridis", name = "Crop Area (ha)")
-
-proj4string(UK$britain)
-c<-UK$britain
-gelman.diag(p,multivariate = F)
-dic(mod$model)
+pr <- 1
+means <- out$mean$beta[pr,]
+lb <- out$q2.5$beta[pr,]
+ub <- out$q97.5$beta[pr,]
+plot_effects("temp",species=species)
 

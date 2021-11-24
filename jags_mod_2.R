@@ -1,33 +1,33 @@
 ############################################################################################
-# Multi-species occupancy model for risk quotient & environment with random species effect #
+# 2. Multi-species occupancy model for risk quotient & environment with random species     #
+# effect                                                                                   #
 ############################################################################################
-# individual RQ analysis - no environmental variables
 rm(list = ls())
 
-library(tictoc)
-
+# slurm input
 i <- as.numeric(commandArgs(trailingOnly = TRUE))[1]
 
+set.seed(i) # 1:3 depending on chain
 
 # data formatted for jags
 jas_data <- readRDS("Model_data/data_spiders_all.499_1994.2010.rds")
 
 # output files
-rdataFile=paste0("Model_outputs/mod.spi.B.all_C.",i,"_run",".rdata")
-save.dir="Model_outputs/mod.spi.B.all"
+rdataFile = paste0("Model_outputs/bee.B.all_C.",i,"_run",".rdata") # used for daisy chain
+save.dir = "Model_outputs/bee.spi.B.all" # used to save output iteration
 
 # CHECK MCMC PARAMETERS !! # 
 # MCMC settings
 ni <- 100; nt <- 3 ; nb <- 0 ; nc <- 1; na <- 100; n.species="all"; daisy=T # can be all
-n.species=2
-
-# covariate formula 
-covars<- jas_data[[4]]# covariates 
-
-covs<-list(covars$temp,covars$rq_sum_wide,covars$semi)
-inters <-NULL
+ 
+# covariate formula
+covars <- jas_data[[4]]# covariates
+covs <- covars # named list
+inters <- NULL # can supply a vector of which variables have interactions based on position in above list
 
 ######################################################################
+# data in format from jags data prep
+
 occup<- jas_data[[1]] #occ data
 visit<- jas_data[[2]]# visit info
 zobs<- jas_data[[3]]# init values
@@ -51,9 +51,10 @@ y[y==T] <- 1
 # ensures data is compatible with jags
 if(closure.period==1){visit$TP <- visit$TP-(min(years)-1) }
 
+###################################################################
+# covarite processing
 
-##########################################################################
-################# OCCUPANCY MODEL ########################################
+# create array for covs
 row = nrow(covars[[1]]); col = ncol(covars[[1]]); nmat = length(covs)
 cov.array <- array(dim=c(row,col,nmat))
 
@@ -61,8 +62,10 @@ for(n in 1:nmat){
   cov.array[,,n]  <- as.matrix(covs[[n]])
 }
 
+# formula for main effects
 formula <- paste0("beta[",1:nmat,",s]*COVS[i,t-1,",1:nmat,"]",collapse ="+")
 
+# if any interactions add to formula
 
 if(!is.null(inters)){
   coms <- combn(inters,2)  
@@ -76,8 +79,13 @@ nmat <- ncol(coms)+nmat
 
 vars <- strsplit(formula,split="+",fixed=T)[[1]]
 
-cat("Ecological model covariate structure",vars,sep="\n")
+# output formula
+cat("Ecological model covariate structure","\n")
+cat(vars,sep="+ \n")
+cat(formula,"\n")
 
+##########################################################################
+################# OCCUPANCY MODEL ########################################
 
 # Bundle data and summarize data bundle
   win.data <-    list(y = y[1:nspecies] , 
@@ -183,32 +191,32 @@ zst <- zobs
 inits <- function(){list(z = zst)}
 
 # Parameters monitored
-params <- c("phi","alpha.phi","mu.alpha.phi","tau.alpha.phi",
+params <- c("alpha.phi","mu.alpha.phi","tau.alpha.phi","alpha.p",
+            "dtype1.p","dtype2.p","dtype3.p",
+            "mu.d3.p","tau.p3","mu.d1.p","tau.p1","mu.d2.p","tau.p2","tau.p",
             "gamma","mu.gamma","tau.gamma",
-            "alpha.p","tau.p",
-            "beta","mu.beta","tau.beta","p",
+            "beta","mu.beta","tau.beta",
             "init.occ")
 
 
-
-source("rjags_func.R")
+# adapted rjags which separates adapt and  burn in
+source("Occ_workflow/jags_rjags_func_2.1.R")
 
 
 # Call JAGS and summarize posteriors
 out <- jagsG(win.data, inits,n.adapt = na, params, "model.txt", n.chains = nc,
-            n.thin = nt, n.iter = ni, n.burnin = nb)
+            n.thin = nt, n.iter = ni, n.burnin = nb, jags.seed = i)
 
 out$index=1
 
+# daisy ID
 id <- paste0("_ID_",out$index)
 
-
+# save daisy
 if(daisy){
-  s=1
   save(out,file=paste0(save.dir,"_C.",i,id,".rdata"))
 }
 
+# save runtime
 save(out,file=rdataFile)
 
-load("Jasmin_outputs/lad.B.all_C.2_run..rdata")
-b=out

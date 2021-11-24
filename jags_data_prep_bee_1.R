@@ -28,8 +28,8 @@ closure.period=2
 lag = T
 
 # group
-occ.dat = readRDS("occurrence_recs/ladybirds.rds")
-group.name="ladybirds"
+occ.dat = readRDS("occurrence_recs/bee.rds")
+group.name="bees"
 
 # sites at the 5km resolution  
 occ.dat$grid <- nchar(as.character(occ.dat$TO_GRIDREF))
