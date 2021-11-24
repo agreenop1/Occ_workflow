@@ -146,8 +146,46 @@ for (s in 1:nspecies){
   } 
 }
 
-# 
-ex.closure=5; ex.COV = NULL; 
+#################
+ex.closure=5; 
+ex.COV = NULL; 
+cov.change= list(c(1,"step",5),c(2,"no",-5),c(3,"constant",20);
+coef.change=list(c(1,0)
+year = 9 # as column reference 
+COVS = COVS
+beta = beta
+ 
+rep.col <- function(x,n){matrix(rep(x,each=n,ncol=n,byrow=T)
+                                
+if(!is.null(ex.COV)) {covs.new =ex.COV
+    }   else { 
+covs.new <-lapply(cov.change, function(x){ 
+               
+                    var  =  COVS[,year,x[1])
+                
+                             if(x[2]=="constant"){
+                              var.t = var*x[3] 
+                              mx = rep.col(var.t,ex.closure)
+                              mx
+                               
+                             }else{
+                              
+                              ct = 1-x[3]
+                              ct1 = 1-(ct/ex.closure)
+                              mx  = matrix(ncol = ex.closure,nrow=length(var))
+                              mx[,1]<- var*ct1
+                              for (i in 2:ex.closure){  mx[,i] <- m[,i-1]*ct1} 
+                               mx 
+                              }
+                             })
+                   
+ beta.new <- beta
+                                 
+   if(is.null(coef.change)){
+     
+     lapply(coef.change,function(x){beta.new[,x[1],]  <- x[2]}
+  list(covs.new,beta.new)      
+##########
 # mean trend
 x=psi
 s.mean<- apply(x,c(2,4),mean)   
