@@ -15,45 +15,15 @@ library(ggmcmc)
 # by.it = number of increases in iterations in each file
 # iterations = iterations to be used
 # verbose = T/F output to console
-plot_div<-function(x,title,subtitle,x.axis.texts,x.title.texts,color,y.axis.texts){
-  
-  library(ggplot2)
-  
-  # figure for diversity measures
-  # standardised effect size plot
-  # trend plot
-  fig<-ggplot(x)+geom_line(aes(y=Mean,x=Year),color=color)+
-    geom_errorbar(aes(x=Year,ymin=LB_95, ymax=UB_95,width=0.6),color=color)+
-    theme(axis.text.y = element_text(size=7),
-          axis.text.x= x.axis.texts ,
-          axis.title.x=x.title.texts, 
-          axis.title.y = y.axis.texts,
-          panel.grid.major = element_blank(), 
-          panel.grid.minor = element_blank(),
-          panel.background = element_blank(),
-          legend.title=element_text(size=8), 
-          legend.text=element_text(size=7),
-          legend.key.size = unit(0.5,"line"),
-          legend.position="none",
-          plot.margin=grid::unit(c(0.5,0.5,0.5,0.5), "mm"),
-          axis.line = element_line(colour = "black"),
-          plot.title = element_text(face="bold",size=9),
-          plot.subtitle=element_text(size=9))+ylab("Occupancy")+ggtitle(title,subtitle = subtitle)+
-    geom_segment(aes(x=Year,xend=Year,y=LB_80, yend=UB_80),color=color, size = 2)+
-    geom_point(aes(y=Mean,x=Year), size = 1)
-  
-  # list of plots    
-  fig
-}
 
-
+################################################################################
 source("Occ_workflow/combine_chain_4.1.R")
 
 file.path = paste0("Jasmin_outputs/", "lad.B.all_C.CID_ID_UID.rdata")
-out <- comb_daisy(parameters=c("beta","deviance","gamma",
-                               "init.occ"),iter.index=1:40,chain.index=1:3,summary=T,file.path=file.path,by.it=500,iterations=10000,verbose=T)
+out <- comb_daisy(parameters=c("beta","deviance","gamma","init.occ","alpha.phi"),
+                  iter.index=1:13,chain.index=1:3,summary=T,file.path=file.path,by.it=1000,iterations=1000,verbose=T)
 
-# species in order they are in occ dataframe!
+#  occ data
 jas_data <- readRDS("Model_data/data_ladybirds_all.499_1994.2010.rds")
 
 # output <- summary_chains(out,comb.chain = T,keep.samples = F)
@@ -61,213 +31,238 @@ jas_data <- readRDS("Model_data/data_ladybirds_all.499_1994.2010.rds")
 # model 
 print(out)
 
+#############################################################
+# Function to simulate occupancy under different covariates #
+#############################################################
 
+sim.occ <-  function(alpha.phi,psi,z,gamma,beta,n.beta,covars,nclosure,
+                     samp.it=100,nspecies,nsites){
+  
+  
+  COVS <- covars 
+  phi <- array(dim=c(samp.it,nspecies,nsites,nclosure))
+  
+  for (s in 1:nspecies){
+    for (i in 1:nsites){
+      for (t in 2:nclosure){
+        
+        # intercept
+        logit.phi <-  (alpha.phi[,s][1:samp.it]) 
+        
+        # covariate effects
+        for (b in 1:n.beta){
+          
+          logit.phi <-  logit.phi + (beta[,b,s][1:samp.it])*COVS[i,t-1,b] 
+        }
+        
+        # persistence
+        phi[,s,i,t] <-   plogis (logit.phi) 
+        
+        # population occupancy
+        psi[,s,i,t] <- psi[,s,i,t-1]*phi[,s,i,t] + (1-psi[,s,i,t-1])*(gamma[,s][1:samp.it]) 
+        
+        # realised occupancy 1 or 0
+        prb  <- z[,s,i,t-1]*phi[,s,i,t] + (1-z[,s,i,t-1])*(gamma[,s][1:samp.it])
+        
+        z[,s,i,t] <- sapply(prb ,function(x){rbinom(1,1,x)})
+      }
+    } 
+  }
+  list(phi=phi,z=z,psi=psi)
+}
 
 #######################################################################################
 # data in format from jags data prep
 occup<- jas_data[[1]] #occ data
 visit<- jas_data[[2]]# visit info
-zobs<- jas_data[[3]]# init values
 closure.period <- jas_data[[5]] #closure period
+site_id <- jas_data[[6]]
 
 # check sample sizes in original data set
 nsites <- length(unique(visit$site_5km)) # sites
 nclosure <- length(unique(visit$TP)) # number of time points
 nspecies <- ncol(occup[-1]) # num. species
+species <- colnames(occup[-1])
 nits <- out$mcmc.info$n.samples
-
-out$model[[1]][[1]]$model
 
 # covariate formula
 covars <- jas_data[[4]]# covariates
-covs <- list(temp=covars$temp_anom,rqsum=covars$RQsum,semi=covars$semi) # named list
-inters <- NULL # can supply a vector of which variables have interactions based on position in above list
+covs <- list(covars$temp_anom,covars$mean_temp, covars$RQsum,covars$semi)
 ###################################################################
 # covarite processing
 
 # create array for covs
-row = nrow(covars[[1]]); col = ncol(covars[[1]]); nmat = length(covs)
+row = nrow(covars[[1]]); col = ncol(covs[[1]]); nmat = length(covs)
 cov.array <- array(dim=c(row,col,nmat))
 
 for(n in 1:nmat){
   cov.array[,,n]  <- as.matrix(covs[[n]])
 }
 
-# formula for main effects
-formula <- paste0("beta[",1:nmat,",s]*COVS[i,t-1,",1:nmat,"]",collapse ="+")
 
-# if any interactions add to formula
+###############################################################
+# simulation params
+sims <- out$sims.list # sims list
+samp.it=60 # samples to use
 
-if(!is.null(inters)){
-  coms <- combn(inters,2)  
-  
-  for (n in 1:ncol(coms)){
-    ints1 <- paste0("+beta[",n+nmat,",s]*COVS[i,t-1,",coms[1,n],"]*COVS[i,t-1,",coms[2,n],"]")
-    formula <- paste0(formula,ints1) }
-  
-  nmat <- ncol(coms)+nmat
-}
+# starting arrays
+psi <- array(dim=c(samp.it,nspecies,nsites,nclosure))
+z <- array(dim=c(samp.it,nspecies,nsites,nclosure))
 
-vars <- strsplit(formula,split="+",fixed=T)[[1]]
 
-# output formula
-cat("Ecological model covariate structure","\n")
-cat(vars,sep="+ \n")
-cat(formula,"\n")
-
-sims <- out$sims.list
-out <-NULL
-nits = nrow(sims$gamma)
-sit=300
-psi <- array(dim=c(sit,nspecies,nsites,nclosure))
-
+# starting values
 for (i in 1:nsites){
-  psi[,,i,1] <- sims$init.occ[sample(1:nits,sit),]
-}
-phi<- array(dim=c(sit,nspecies,nsites,nclosure))
-gamma <- sims$gamma
-alpha.phi <- sims$gamma
-beta <- sims$beta
-COVS = cov.array
-
-
-for (s in 1:nspecies){
-  for (i in 1:nsites){
-    for (t in 2:nclosure){
-      
-      phi[,s,i,t] <-   plogis (  sample(alpha.phi[,s],sit) +
-                                   sample(beta[,1,s],sit)*COVS[i,t-1,1] +
-                                   sample(beta[,2,s],sit)*COVS[i,t-1,2] +
-                                   sample(beta[,3,s],sit)*COVS[i,t-1,3]) 
-      
-      psi[,s,i,t] <- psi[,s,i,t-1]*phi[,s,i,t] + (1-psi[,s,i,t-1])*sample(gamma[,s],sit)
-      
-    }
-  } 
+  psi[,,i,1] <- sims$init.occ[1:samp.it,]
+  z[,,i,1] <- sapply(psi[,,i,1],function(x){rbinom(1,1,x)})
+  
 }
 
-#################
-ex.closure=5; 
-ex.COV = NULL; 
-cov.change= list(c(1,"step",5),c(2,"no",-5),c(3,"constant",20);
-coef.change=list(c(1,0)
-year = 9 # as column reference 
-COVS = COVS
-beta = beta
- 
-rep.col <- function(x,n){matrix(rep(x,each=n,ncol=n,byrow=T)
+# simulate occupancy
+base <- sim.occ(alpha.phi=sims$alpha.phi,psi=psi,z=z,gamma=sims$gamma,
+                beta=sims$beta,n.beta=4,
+                covars=cov.array,nclosure=10,
+                samp.it=99,nspecies=nspecies,nsites=nsites)
+
+phi.1=base$phi
+
+phi.1[,,1,2]==phi.x[,,1,2]
+################################################################
+covar_adapt <- function(COVS,cov.change,rep.closure,ref.closure){
+rep.col <- function(x,n){matrix(rep(x,each=n),ncol=n,byrow=T)}
                                 
-if(!is.null(ex.COV)) {covs.new =ex.COV
-    }   else { 
 covs.new <-lapply(cov.change, function(x){ 
                
-                    var  =  COVS[,year,x[1])
+                    cov.i=x[[1]]
+                    type=x[[2]]
+                    per=x[[3]]
                 
-                             if(x[2]=="constant"){
-                              var.t = var*x[3] 
-                              mx = rep.col(var.t,ex.closure)
+                             if(type=="constant"){
+                               
+                              var  =  COVS[,ref.closure,cov.i]
+                              var.t = var*per 
+                              mx = rep.col(var.t,rep.closure)
                               mx
                                
-                             }else{
-                              
-                              ct = 1-x[3]
-                              ct1 = 1-(ct/ex.closure)
-                              mx  = matrix(ncol = ex.closure,nrow=length(var))
+                             }else if(type=="step"){
+                               
+                              var  =  COVS[,ref.closure,cov.i]
+                              ct = 1-per
+                              ct1 = 1-(ct/rep.closure)
+                              mx  = matrix(ncol = rep.closure,nrow=length(var))
                               mx[,1]<- var*ct1
-                              for (i in 2:ex.closure){  mx[,i] <- m[,i-1]*ct1} 
-                               mx 
-                              }
+                              for (i in 2:rep.closure){  mx[,i] <- mx[,i-1]*ct1} 
+                               mx
+                               
+                             }else if(type=="selection"){
+                               
+                               mx  =  COVS[,per,cov.i]
+                               mx
+                               
+                            }  else {
+                              
+                              mx  =  COVS[,ref.closure,cov.i]
+                              mx[mx>-9999] = 0
+                              mx = rep.col(mx,rep.closure)
+                              mx}
                              })
-                   
- beta.new <- beta
-                                 
-   if(is.null(coef.change)){
-     
-     lapply(coef.change,function(x){beta.new[,x[1],]  <- x[2]}
-  list(covs.new,beta.new)      
-##########
-# mean trend
-x=psi
-s.mean<- apply(x,c(2,4),mean)   
-s.025<-  apply(x,c(2,4),quantile,probs = 0.025)
-s.0975<- apply(x,c(2,4),quantile,probs = 0.975)
-s.010<-  apply(x,c(2,4),quantile,probs = 0.10)
-s.090<-  apply(x,c(2,4),quantile,probs = 0.90)
-a=list()
-# 
-for (i in 1:nspecies){
-x1=data.frame(Mean=s.mean[i,],
-           LB_95  =    s.025[i,], 
-           UB_95 =   s.0975[i,],
-           LB_80 =    s.010[i,], 
-           UB_80 =    s.090[i,],
-           Year = seq(1994,2012,2))
+         
+  new.cov.array <- array(dim=c(row,rep.closure,nmat))
+  for(n in 1:nmat){
+   new.cov.array[,,n]  <- as.matrix(covs.new[[n]])
+  }
+  new.cov.array
+} 
+  
+  if(!is.null(coef.change)){ lapply(coef.change,function(x){beta.new[,x[1],]  <- x[2]})}
+###########################################################################################  
+COV1<- covar_adapt(rep.closure=9, 
+            cov.change= list(list(1,"step",1.05),list(2,"mean",1),list(3,"step",1.05),list(4,"constant",1)),
+            ref.closure = 9, # as column reference 
+            COVS = cov.array)
+COV2<- covar_adapt(rep.closure=9, 
+                   cov.change= list(list(1,"mean",1.10),list(2,"mean",1),list(3,"step",1.10),list(4,"constant",1)),
+                   ref.closure = 9, # as column reference 
+                   COVS = cov.array)
 
-a[[i]]=plot_div(x1,title=NULL,subtitle = "Trend", color="#3399FF",x.axis.texts = element_text(size=8),x.title.texts =element_text(size=8),
-         y.axis.texts = element_text(size=8))
+for (i in 1:nsites){
+  psi[,,i,1] <- base$psi[,,i,10]
+  z[,,i,1] <- sapply(psi[,,i,1],function(x){rbinom(1,1,x)})
+  
 }
-a
+occ1=sim.occ(alpha.phi=sims$alpha.phi,psi=psi,z=z,gamma=sims$gamma,
+        beta=sims$beta,n.beta=4,
+        covars=COV1,nclosure=10,
+        samp.it=300,nspecies=nspecies,nsites=nsites)
 
-# maps
-# percent or 0 beta
-func.det <- array(dim=c(nclosure,nspecies,nsites,sit))
-for(ni in 1:sit ){
+
+occ2=sim.occ(alpha.phi=sims$alpha.phi,psi=psi,z=z,gamma=sims$gamma,
+        beta=sims$beta,n.beta=4,
+        covars=COV2,nclosure=10,
+        samp.it=300,nspecies=nspecies,nsites=nsites)
+
+#########################################################################
+samples <-out$samples
+nchains <- 3
+samp.it <- length(samples[,"beta[1,1]",][[1]])
+chain.par <- list()
+COVS <- cov.array
+n.beta <- 4  
+nspecies = 2
+
+  for(c in 1:nchains){
+    
+  phi <- array(dim=c(samp.it,nspecies,nsites,nclosure))
+  psi <- array(dim=c(samp.it,nspecies,nsites,nclosure))
+  z <- array(dim=c(samp.it,nspecies,nsites,nclosure))
+  
   for (s in 1:nspecies){
     for (i in 1:nsites){
-      for (t in 1:nclosure){
+      psi[,s,i,1] <- samples[,paste0("init.occ[",s,"]"),][[c]]
+      z[,s,i,1] <- sapply(psi[,s,i,1],function(x){rbinom(1,1,x)})
+      
+      for (t in 2:nclosure){
         
-        func.det[t,s,i,ni] <- psi[ni,s,i,t]
+        # intercept
+        logit.phi <-   samples[,paste0("alpha.phi[",s,"]"),][[c]]
         
+        # covariate effects
+        for (b in 1:n.beta){
+          
+          logit.phi <-  logit.phi + samples[,paste0("beta[",b,",",s,"]"),][[c]]*COVS[i,t-1,b] 
+        }
+        
+        # persistence
+        phi[,s,i,t] <-   plogis (logit.phi) 
+        
+        # population occupancy
+        psi[,s,i,t] <- psi[,s,i,t-1]*phi[,s,i,t] + (1-psi[,s,i,t-1])*samples[,paste0("gamma[",s,"]"),][[c]] 
+        
+        # realised occupancy 1 or 0
+        prb  <- z[,s,i,t-1]*phi[,s,i,t] + (1-z[,s,i,t-1])*samples[,paste0("gamma[",s,"]"),][[c]]
+        
+        z[,s,i,t] <- sapply(prb ,function(x){rbinom(1,1,x)})
       }
-    }
+    } 
   }
+ chain.par[[c]] <-list(z=z,phi=phi,psi=psi)
 }
+s1= samples[,"phi[1,1,2]",][[1]]
+chain.par[[1]]$phi[,1,1,2]
+dimnames(samples)
 
 
-betapart::beta.pair.abund(func.det[,,1,1])
+  logit.phi <-  samples[,paste0("alpha.phi[",s,"]"),][[c]] +
+                samples[,paste0("beta[",1,",",s,"]"),][[c]]*COVS[i,t-1,1] +
+                samples[,paste0("beta[",2,",",s,"]"),][[c]]*COVS[i,t-1,2] +
+                samples[,paste0("beta[",3,",",s,"]"),][[c]]*COVS[i,t-1,3] +
+                samples[,paste0("beta[",4,",",s,"]"),][[c]]*COVS[i,t-1,4] 
 
-##########################################################################
-############### Parameter effects across England #########################
-##########################################################################
-covar <- readRDS("chems_W_SID.csv")
-psi <- mod$sims.list["psi"]
-
-var.x <- "Insecticide"
-
-dat.x  <- covar[[var.x]]
-var_mean <- data.frame((colMeans(covar[[var.x]][,-1],na.rm = T)))
-colnames(var_mean)[1] <- c("mean")
-var_mean$year  <- rownames(var_mean)
-var_mean <- var_mean[order(var_mean$mean),]
-min.x <- var_mean[1,2]
-max.x <- var_mean[nrow(var_mean),2]
-
-x.map <- cbind(dat.x$gr, dat.x[[min.x]]/dat.x[[max.x]])
-y.map <- 
-  
-  
-  ggplot() +
-  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
-  ylim(0, 700000)  + geom_tile(data = filter(p, year == "1994"), 
-                               aes(x = E, y = N, fill = weight_applied))+
-  scale_fill_continuous(type = "viridis", name = "Crop Area (ha)")
-
-proj4string(UK$britain)
-c<-UK$britain
-gelman.diag(p,multivariate = F)
-dic(mod$model)
-
-##############################################
-trend<-function(x){
-  out<- data.frame (matrix (ncol=6,nrow = 10))
-  colnames(out)<-c("Year","Mean","95_LB","95_UB","80_LB","80_UB")
-  out[1:10,1]<- seq(1970,2015,by=5)
-  out[1:10,2]<- apply(x,1,mean)   
-  out[1:10,3]<- apply(x,1,quantile,probs = 0.025)
-  out[1:10,4]<- apply(x,1,quantile,probs = 0.975)
-  out[1:10,5]<- apply(x,1,quantile,probs = 0.10)
-  out[1:10,6]<- apply(x,1,quantile,probs = 0.90)
-  out}
-
-
+# persistence
+s2= plogis(logit.phi) 
+  i=1
+  t=2
+ s=1
+ c=1
  
+plot(density(s1)) 
+plot(density(s2)) 

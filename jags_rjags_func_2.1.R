@@ -16,8 +16,9 @@ jagsG <- function( data, inits,n.adapt,
                  quiet = FALSE
 )
 {
-  require( rjags )
-  require (R2jags)
+  suppressPackageStartupMessages(library(rjags,quietly=T))
+  suppressPackageStartupMessages(library(R2jags,quietly=T))
+  
   if( !is.null( working.directory ) ){
     working.directory <- path.expand( working.directory )
     savedWD <- getwd()
