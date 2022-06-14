@@ -16,10 +16,14 @@ file="3_bee"
 # read in data with cover it information
 data="bees"
 
+
+# species in order they are in occ dataframe!
+jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016.rds"))
+
 # the number of sites and number of time periods
 time = 13
 sites = 2278
-
+species = ncol(jas_data[[1]][-1])
 # number of iterations in each file
 its <- c(500)
 
@@ -28,9 +32,6 @@ file.path = paste0("jas_out/",file ,"_C.CID_ID_UID.rdata")
 
 # iterations used
 iterations. <- 1800
-
-# species in order they are in occ dataframe!
-jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016.rds"))
 
 # compile the chains from the model
 #out <- comb_daisy(parameters=para,
@@ -43,7 +44,7 @@ out <- readRDS("jas_out/summary_p.rds")[[2]]
 
 # out latent occupancy
 beta <- out$sims.list$mu.beta
-colMeans(beta)
+ecolMeans(beta)
 ncol(s)
 # gamma
 gamma <- inv_logit_scaled( out$sims.list$mu.gamma )
@@ -62,6 +63,13 @@ covars = jas_data[[4]]
 base <- list(temp.m=covars$mean_temp,temp.a=covars$temp_anom,semi=covars$semi,agri=covars$agri,RQA=covars$RQsum_A,RQM=covars$RQsum_M)
 
 
+#  multiple species check
+nrep <- 10 #dim(out$sims.list$beta)[1]
+popocc <- array(dim=c(nrep,species,sites,time))
+beta <- out$sims.list$beta[1:nrep,,]
+gamma <-  out$sims.list$init.occ[1:nrep,]
+init <-  out$sims.list$init.occ[1:nrep,]
+alpha <- out$sims.list$init.occ[1:nrep,]
 
 ############################## Array function ################
 # create array for covs
@@ -76,29 +84,59 @@ cov.array
 ##############################################################
 ################# Simulation function ########################
 ##############################################################
-sim.pop <-  function(psi,psi.start,alpha,gamma,cov.array){
+sim.pop <-  function(psi,psi.start,alpha,gamma,beta,cov.array,species){
 
-# starting values
-psi[,1:sites,1] <- psi.start
+if(species==T){
 
-# calculate phi
-for(i in 1:sites){
-  for(t in 2:time){
+nspecies <- ncol(gamma)
+
+for(s in 1:nspecies){  
   
+  # starting values
+  psi[,s,1:sites,1] <- psi.start[,s]
+  
+  # calculate phi
+  for(i in 1:sites){
+    for(t in 2:time){
     
-phi <- alpha + cov.array[i,t-1,1]*beta[,1] +
-               cov.array[i,t-1,2]*beta[,2] +
-               cov.array[i,t-1,3]*beta[,3] +
-               cov.array[i,t-1,4]*beta[,4] +
-               cov.array[i,t-1,5]*beta[,5] +
-               cov.array[i,t-1,6]*beta[,6] 
-
-psi[,i,t] <-  psi[,i,t-1]* inv_logit_scaled(phi) + (1- psi[,i,t-1])*gamma
+      
+      phi <- alpha[,s] + cov.array[i,t-1,1]*beta[,1,s] +
+                     cov.array[i,t-1,2]*beta[,2,s] +
+                     cov.array[i,t-1,3]*beta[,3,s] +
+                     cov.array[i,t-1,4]*beta[,4,s] +
+                     cov.array[i,t-1,5]*beta[,5,s] +
+                     cov.array[i,t-1,6]*beta[,6,s] 
+      
+      psi[,s,i,t] <-  psi[,s,i,t-1]* inv_logit_scaled(phi) + (1- psi[,s,i,t-1])*gamma[,s]
+      
+    }
   }
-}
+}  
 psi
-}
 
+}else{
+  # starting values
+  psi[,1:sites,1] <- psi.start
+  
+  # calculate phi
+  for(i in 1:sites){
+    for(t in 2:time){
+      
+      
+      phi <- alpha + cov.array[i,t-1,1]*beta[,1] +
+        cov.array[i,t-1,2]*beta[,2] +
+        cov.array[i,t-1,3]*beta[,3] +
+        cov.array[i,t-1,4]*beta[,4] +
+        cov.array[i,t-1,5]*beta[,5] +
+        cov.array[i,t-1,6]*beta[,6] 
+      
+      psi[,i,t] <-  psi[,i,t-1]* inv_logit_scaled(phi) + (1- psi[,i,t-1])*gamma
+    }
+  }
+  psi 
+  
+}
+}
 
 # summarize output
 summ <- function(x,year){
@@ -111,6 +149,17 @@ summ <- function(x,year){
   trend}
 ###############################################################
 ##################### Run simulations #########################
+###############################################################
+# Species
+# simulation
+psi1 <- sim.pop(psi.start = init,
+                gamma = gamma,
+                beta = beta,
+                alpha = alpha,
+                psi =  array(dim=c(nrep,species,sites,time)),
+                cov.array = f_array(covs),
+                species=T)
+popbin <- apply(psi1,c(2,3,4),function(x){rbinom(length(x),1,x)})
 ###############################################################
 # SPATIAL
 # Pesticide Simulation 
@@ -459,3 +508,18 @@ ggplot() +
   scale_fill_continuous(type = "viridis", name = "Change in occupancy")+ theme(panel.grid.major = element_blank(), 
                                                                                      panel.grid.minor = element_blank(),
                                                                                      panel.background = element_blank())
+
+
+#################################################################
+############# PP Checks #########################################
+#################################################################
+# aggregate observations where a species was observed at a site
+out <- readRDS("jas_out/summary_p.rds")[[1]]
+occ <- jas_data[[1]][-1]
+vis <- jas_data[[2]]
+check <- cbind(totaln = rowSums(occ),vis) %>% group_by(site,TP) %>% summarise(total=sum(totaln))
+
+# plot density
+ggplot() + geom_density(aes(x=log(check$total)))
+
+
