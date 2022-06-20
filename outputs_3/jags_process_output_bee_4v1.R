@@ -36,7 +36,7 @@ iterations. <- 200
 jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016.rds"))
 
 
-out <- readRDS("jas_out/summary_p.rds")[[1]]
+out <- readRDS("jas_out/summary_ps.rds")[[1]]
 
 # output <- summary_chains(out,comb.chain = T,keep.samples = F)
 options(max.print=10000)
@@ -46,7 +46,7 @@ samples = out$samples
 occ.sum <- data.frame(round(out$summary,3))
 con.f <- occ.sum[occ.sum$Rhat>1.05,]
 rhat. <- out$Rhat
-e
+
 samp.df <- ggmcmc::ggs(samples)
 
 # co-variates in order used in model
