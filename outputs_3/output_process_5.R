@@ -8,6 +8,7 @@ library(tidyverse)
 library(ggplot2)
 library(dplyr)
 library(forcats)
+source("output_functions.R")
 source("Occ_workflow_V2/outputs_3/combine_chain_4.2.R")
 UK <-  readRDS("UK_map.rds")
 # read in parameters
@@ -34,10 +35,6 @@ its <- c(500)
 # file path where the files are located
 file.path = paste0("jas_out/",file ,"_C.CID_ID_UID.rdata")
 
-# iterations used
-iterations. <- 1800
-
-
 # covariates
 covars = jas_data[[4]]
 base <- list(temp.m=covars$mean_temp,temp.a=covars$temp_anom,semi=covars$semi,agri=covars$agri,RQA=covars$RQsum_A,RQM=covars$RQsum_M)
@@ -53,83 +50,6 @@ occ_output <- readRDS("jas_out/summary_ps.rds")
 out <- occ_output[[2]]
 
 
-
-############################## Array function ################
-# create array for covs
-f_array <- function(x){
-             row = nrow(x[[1]]); col = ncol(x[[1]]); nmat = length(covs)
-             cov.array <- array(dim=c(row,col,nmat))
-             
-             for(n in 1:nmat){
-               cov.array[,,n]  <- as.matrix(x[[n]])}
-cov.array             
-}
-##############################################################
-################# Simulation function ########################
-##############################################################
-sim.pop <-  function(psi,psi.start,alpha,gamma,beta,cov.array,species){
-
-if(species==T){
-
-nspecies <- ncol(gamma)
-
-for(s in 1:nspecies){  
-  
-  # starting values
-  psi[,s,1:sites,1] <- psi.start[,s]
-  
-  # calculate phi
-  for(i in 1:sites){
-    for(t in 2:time){
-    
-      
-      phi <- alpha[,s] + cov.array[i,t-1,1]*beta[,1,s] +
-                     cov.array[i,t-1,2]*beta[,2,s] +
-                     cov.array[i,t-1,3]*beta[,3,s] +
-                     cov.array[i,t-1,4]*beta[,4,s] +
-                     cov.array[i,t-1,5]*beta[,5,s] +
-                     cov.array[i,t-1,6]*beta[,6,s] 
-      
-      psi[,s,i,t] <-  psi[,s,i,t-1]* inv_logit_scaled(phi) + (1- psi[,s,i,t-1])*gamma[,s]
-      
-    }
-  }
-}  
-psi
-
-}else{
-  # starting values
-  psi[,1:sites,1] <- psi.start
-  
-  # calculate phi
-  for(i in 1:sites){
-    for(t in 2:time){
-      
-      
-      phi <- alpha + cov.array[i,t-1,1]*beta[,1] +
-        cov.array[i,t-1,2]*beta[,2] +
-        cov.array[i,t-1,3]*beta[,3] +
-        cov.array[i,t-1,4]*beta[,4] +
-        cov.array[i,t-1,5]*beta[,5] +
-        cov.array[i,t-1,6]*beta[,6] 
-      
-      psi[,i,t] <-  psi[,i,t-1]* inv_logit_scaled(phi) + (1- psi[,i,t-1])*gamma
-    }
-  }
-  psi 
-  
-}
-}
-
-# summarize output
-summ <- function(x,year){
-  m1 <- apply(x,c(3),mean)
-  m2 <- apply(x,c(3),quantile,probs = 0.025)
-  m3 <- apply(x,c(3),quantile,probs = 0.975)
-  
-  trend <- data.frame(mean=m1,lb=m2,ub=m3)
-  trend$year <- year 
-  trend}
 
 
 
@@ -254,12 +174,12 @@ for(i in 1:nrep){
 # plots of model predictive ability
 ggplot() + geom_density(data=occres1,aes(x=log(sr),group=as.factor(rep)))+geom_density(aes(x=log(sr_site$total)),color="blue")
 ggplot() + geom_density(data=occres1,aes(x=sr_diff,group=as.factor(rep)))
-
-
+ggplot() + geom_histogram(data=occres1,aes(x=sr_diff))
+quantile(occres1$sr_diff,0.19)
 ###############################################################
 ##################### Diagnostic Plots ########################
 ###############################################################
-source("output_functions.R")
+
 species <- colnames(jas_data[[1]][-1])
 nspecies <- length(species)
 out <- occ_output[[2]]
@@ -329,59 +249,63 @@ save(out,file="jas_out/3_bee_all_C.3_run.rdata")
 ###############################################################
 ##################### Run simulations #########################
 ###############################################################
-#   
-# out latent occupancy
-beta <- out$sims.list$mu.beta
-ecolMeans(beta)
-ncol(s)
+# ALL MEAN EFFECT
+out <- occ_output[[2]]
+# iterations used
+iterations. <- 2000
+
+# beta coefficients
+beta <- out$sims.list$mu.beta[1:iterations.,]
+
+
+
 # gamma
-gamma <- inv_logit_scaled( out$sims.list$mu.gamma )
-summary(mean(gamma) )
+gamma <- inv_logit_scaled( out$sims.list$mu.gamma[1:iterations.] )
+
 
 # initial occupancy
 init <- out$sims.list$init.occ
-inv_logit_scaled (mean(colMeans(logit_scaled( init))))
 
 # alpha.phi - intercept
-alpha.phi <- out$sims.list$mu.alpha.phi
-summary(mean(alpha.phi)) 
+alpha.phi <- out$sims.list$mu.alpha.phi[1:iterations.]
+ 
 
-# SPATIAL
-# Pesticide Simulation 
-# parameters for simulation
+# RISK QUOTIENT SPATIAL EFFECT
+# covariates
 covs <- c(base) 
 covs1 <- c(base)
 
 # cov 1
 # min vlue
-min(covs$RQA)
-covs$RQA[,1:12] <- 0
-
-min(covs$RQM)
-
+covs$RQA[,1:12] <- 0 # set temporal effect to zero
 
 # cov 2
 # min vlue
 min(covs$RQA)
-covs1$RQA[,1:12] <- 0
+covs1$RQA[,1:12] <- 0 # set temporal effect to zero
 
 min(covs$RQM)
-covs1$RQM[,1:12] <-  -5.855139
+covs1$RQM[,1:12] <-  -5.855139 # centered value for zero
 
 # simulation
 psi1 <- sim.pop(psi.start = 0.50,
                 gamma = gamma,
                 alpha = alpha.phi,
+                beta = beta,
                 psi = array(dim = c(iterations.,sites,time)),
-                cov.array = f_array(covs))
+                cov.array = f_array(covs),
+                species=F)
 
 psi2 <- sim.pop(psi.start = 0.50,
                 gamma = gamma,
                 alpha = alpha.phi,
+                beta = beta,
                 psi = array(dim = c(iterations.,sites,time)),
-                cov.array = f_array(covs1))
+                cov.array = f_array(covs1),
+                species=F
+                )
 
-
+# summarize all sites by year
 m1 <- summ(psi1,year=seq(1994,2018,2))
 m1$name <- "With pesticide"
 m2 <- summ(psi2,year = seq(1994,2018,2)) 
@@ -389,7 +313,7 @@ m2$name <- "Without pesticide"
 
 m <- rbind(m1,m2)
 
-library(ggplot2)
+# occupancy by year
 ggplot(data=m)+geom_line(aes(x=year,y=mean,color=name),size=1)+
          geom_ribbon(aes(x=year,ymin=lb,ymax=ub,fill=name),alpha=0.2)+ylim(0,1)+
   theme(
@@ -399,13 +323,14 @@ ggplot(data=m)+geom_line(aes(x=year,y=mean,color=name),size=1)+
         axis.line = element_line(colour = "black"),
   )+ylab("Occupancy")+xlab("Year")
 
+# difference risk quotient scenarios
 diffp <-  psi1-psi2
 
  
- m3 <- summ(diffp,year = seq(1994,2018,2)) 
+diffsum <- summ(diffp,year = seq(1994,2018,2)) 
 
-
-ggplot(data=m3)+geom_point(aes(x=year,y=mean))+
+# difference plot
+ggplot(data=diffsum)+geom_point(aes(x=year,y=mean))+
   geom_errorbar(aes(x=year,ymin=lb,ymax=ub),alpha=0.2)+geom_hline(yintercept = 0,linetype="dashed")+
   theme(
     panel.grid.major = element_blank(), 
@@ -415,80 +340,75 @@ ggplot(data=m3)+geom_point(aes(x=year,y=mean))+
   )+ylab("Difference in occupancy")+xlab("Year")
 
 
-
-###############################################################
-# Change Maps 
-# summarize output
-summs <- function(x,year){
-  m1 <-round( apply(x,c(2,3),mean),3)
-  m2 <-round( apply(x,c(2,3),quantile,probs = 0.025),3)
-  m3 <-round( apply(x,c(2,3),quantile,probs = 0.975),3)
-  m4 <-round( apply(x,c(2,3),quantile,probs = 0.05),3)
-  m5 <-round( apply(x,c(2,3),quantile,probs = 0.95),3)
-  m6 <-round( apply(x,c(2,3),sd),3)
-if(is.null(year)){
-list(mean = m1,lb = m2, ub = m3)}else{
-  data.frame(mean = m1[,year],lb95 = m2[,year], ub95 = m3[,year],
-             lb90 = m4[,year], ub90 = m5[,year],sd=m6[,year])
-}
-}
-
-
-
 # site level changes between the first and the last year
 sitep <- summs(diffp,year = 13)
 
+# read in the sight id grid cells
 site_id <- read.csv("site_id.csv")[2]
-sitech <- cbind(sitep,site_id)
+site_changes <- cbind(sitep,site_id)
 coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
-sitech <- left_join(sitech,coord )
+sitech <- left_join(site_changes,coord )
 
+# rq effect map
 plots_map <- list(
-ggplot() +
-  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
-  ylim(0, 700000)  + geom_tile(data = sitech, 
-                               aes(x = E, y = N, fill =mean))+
-  scale_fill_continuous(type = "viridis", name = "")+ theme(panel.grid.major = element_blank(), 
-                                                                      panel.grid.minor = element_blank(),
-                                                                      panel.background = element_blank())+
-                                                                       ggtitle("Mean change in occupancy"),
-
-ggplot() +
-  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
-  ylim(0, 700000)  + geom_tile(data = sitech, 
-                               aes(x = E, y = N, fill =sd))+
-  scale_fill_continuous(type = "viridis", name = "")+ theme(panel.grid.major = element_blank(), 
-                                                                                    panel.grid.minor = element_blank(),
-                                                                                    panel.background = element_blank())+
-  ggtitle("SD change in occupancy")
+  ggplot() +
+    geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(90000, 660000) +ylim(0,660000)+ 
+    geom_tile(data = sitech, 
+              aes(x = E, y = N, fill =mean))+
+    scale_fill_continuous(type = "viridis", name = "",direction=-1)+ theme(axis.line=element_blank(),axis.text.x=element_blank(),
+                                                                           axis.text.y=element_blank(),axis.ticks=element_blank(),
+                                                                           axis.title.x=element_blank(),
+                                                                           legend.title=element_blank(),
+                                                                           axis.title.y=element_blank(),
+                                                                           panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+                                                                           panel.grid.minor=element_blank(),plot.background=element_blank())+
+    ggtitle("Mean change in occupancy"),
+  
+  ggplot() +
+    geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+    ylim(0, 700000)  + geom_tile(data = sitech, 
+                                 aes(x = E, y = N, fill =lb90))+
+    scale_fill_continuous(type = "viridis", name = "")+ theme( axis.text.y = element_text(size=10),
+                                                               axis.text.x=  element_text(size=10),
+                                                               axis.title.x= element_text(size=11), 
+                                                               axis.title.y =element_text(size=11),panel.grid.major = element_blank(), 
+                                                               panel.grid.minor = element_blank(),
+                                                               panel.background = element_blank(),
+    )+
+    ggtitle("Lower 95%CI change in occupancy"),
+  
+  ggplot() +
+    geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+    ylim(0, 700000)  + geom_tile(data = sitech, 
+                                 aes(x = E, y = N, fill =ub90))+
+    scale_fill_continuous(type = "viridis", name = "")+ theme( axis.text.y = element_text(size=10),
+                                                               axis.text.x=  element_text(size=10),
+                                                               axis.title.x= element_text(size=11), 
+                                                               axis.title.y =element_text(size=11),panel.grid.major = element_blank(), 
+                                                               panel.grid.minor = element_blank(),
+                                                               panel.background = element_blank(),
+    )+
+    ggtitle("Upper 95%CI change in occupancy")
 )
+ggpubr::ggarrange(plotlist = plots_map,nrow=1)
+ggsave("spatial_plot_mean.png",dpi=2000,plot= plots_map[[1]],width = 4.5,height=4.5)
+ggsave("spatial_plot.png",dpi=2000,plot= plots_map[[2]],width = 4.5,height=4.5)
 
-ggsave("spatial_plot.png",plot= ggpubr::ggarrange(plotlist = plots_map),width = 10,height=7)
 
 
 
-###############################################################
-##################### Run simulations #########################
-###############################################################
-# TEMPORAL
+################################################################################
+# TEMPORAL RISK QUOTIENT EFFECT
 # covariates
-covars = jas_data[[4]]
-base <- list(temp.m=covars$mean_temp,temp.a=covars$temp_anom,semi=covars$semi,agri=covars$agri,RQA=covars$RQsum_A,RQM=covars$RQsum_M)
-covs <- c(base) 
-covs1 <- c(base)
+covs <- c(base)  # original covariates
+covs1 <- c(base) # covariates to be changed
 
-# cov 1
-# min vlue
-all(covs$RQA>=covs1$RQA)
 
-# cov 2
-# min vlue
-min(covs$RQA)
-min(covs$RQM)
-z0 <-  readRDS("zero_app.rds")
-z0$z0>z0$z1
-covs$RQA[,1:12] <- z0$z0[-1]
-covs1$RQA[,1:12] <-  z0$z1[-1]
+# covariates
+rqtemp <-  readRDS("zero_app.rds") # standardized value for zero for each covariate
+
+covs$RQA[,1:12] <- rqtemp$actual[-1] 
+covs1$RQA[,1:12] <-  rqtemp$zero_application[-1]
 
 
 # Pesticide Simulation 
@@ -496,75 +416,36 @@ covs1$RQA[,1:12] <-  z0$z1[-1]
 psi1 <- sim.pop(psi.start = 0.50,
                 gamma = gamma,
                 alpha = alpha.phi,
+                beta =  beta,
                 psi = array(dim = c(iterations.,sites,time)),
-                cov.array = f_array(covs))
+                cov.array = f_array(covs),
+                species=F)
 
 psi2 <- sim.pop(psi.start = 0.50,
                 gamma = gamma,
                 alpha = alpha.phi,
+                beta =  beta,
                 psi = array(dim = c(iterations.,sites,time)),
-                cov.array = f_array(covs1))
+                cov.array = f_array(covs1),
+                species=F)
 
+
+# different between simulations
 diffp<-  psi1-psi2
-all0 <- distinct(data.frame( apply(diffp,c(1,2),function(x) all(x==0))))
-l <- !unlist( all0[1,])
-nr <-  nrow(diffp[1,l,])
-difference <- array(dim=c(1800,nr,13))
-                    
-for (i in 1:1800){
-difference[i,,]  <- diffp[i,nr,] 
-}
 
 
+# summarize occupancies
 m1 <- summ(psi1,year=seq(1994,2018,2))
 m1$name <- "With pesticide"
 m2 <- summ(psi2,year = seq(1994,2018,2)) 
 m2$name <- "Without pesticide"
 
-m <- rbind(m1,m2)
 
-library(ggplot2)
-ggplot(data=m)+geom_line(aes(x=year,y=mean,color=name),size=1)+
-  geom_ribbon(aes(x=year,ymin=lb,ymax=ub,fill=name),alpha=0.2)+ylim(0,1)+
-  theme(
-    panel.grid.major = element_blank(), 
-    panel.grid.minor = element_blank(),
-    panel.background = element_blank(),
-    axis.line = element_line(colour = "black"),
-  )+ylab("Occupancy")+xlab("Year")
+m3 <- rbind(m1,m2)
+rqt_summ <- summ(diffp,year = seq(1994,2018,2)) 
 
-slope <- function(x){
-  l <- dim(x)[1]
-  time <- dim(x)[3]
-  
-  out <- array(dim=c(l,dim(x)[2],time-1))
-  
-  for(i in 1:l){
-    
-    out[i,,]  <- (x[i,,-1]-x[i,,1:12])/2
-    
-  }
-  out
-}
-
-s1 <- slope(psi1)
-s2 <- slope(psi2)
-
-diff_s <- s1-s2
-diffp<-  psi1-psi2
-m2 <- summ(diff_s,year = seq(1996,2018,2)) 
-m3 <- summ(diffp,year = seq(1994,2018,2)) 
-
-ggplot(data=m2)+geom_point(aes(x=year,y=mean))+
-  geom_errorbar(aes(x=year,ymin=lb,ymax=ub),alpha=0.2)+geom_hline(yintercept = 0,linetype="dashed")+
-  theme(
-    panel.grid.major = element_blank(), 
-    panel.grid.minor = element_blank(),
-    panel.background = element_blank(),
-    axis.line = element_line(colour = "black"),
-  )+ylab("Difference in slopes")+xlab("Year")
-
-ggplot(data=m3)+geom_point(aes(x=year,y=mean))+
+# rq temporal effect through time
+ggplot(data=rqt_summ)+geom_point(aes(x=year,y=mean))+
   geom_errorbar(aes(x=year,ymin=lb,ymax=ub),alpha=0.2)+geom_hline(yintercept = 0,linetype="dashed")+
   theme(
     panel.grid.major = element_blank(), 
@@ -574,127 +455,250 @@ ggplot(data=m3)+geom_point(aes(x=year,y=mean))+
   )+ylab("Difference in occupancy")+xlab("Year")
 
 
-###############################################################
-# site level changes between the first and the last year
-plots <- list()
 
-for(i in 1:12){
-  sitep <- summs(diff_s,year = i)
+###############################################################
+# site level changes between for all years
+plots <- list()
+years <- seq(1996,2018,2)
+for(i in c(2,12,13)){
+  sitep <- summs(diffp,year = i)
   
   site_id <- read.csv("site_id.csv")[2]
   sitech <- cbind(sitep,site_id)
   coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
   sitech <- left_join(sitech,coord )
-  sitech. <- sitech[sitech$ub95<0,]
-  plots[[i]] <- ggplot() +
-    geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
-    ylim(0, 700000)  + geom_tile(data = sitech., 
-                                 aes(x = E, y = N, fill =mean))+
-    scale_fill_continuous(type = "viridis", name = paste("Change in occupancy",i))+
-    theme(panel.grid.major = element_blank(), 
-          panel.grid.minor = element_blank(),
-          panel.background = element_blank())
+  sitech$mean[sitech$ub95>=0] <- NA
+  plots[[i-1]] <- ggplot() +
+    geom_path(data = UK$britain, aes(x = long, y = lat, group = group))+ xlim(90000, 660000) +ylim(0,660000)+
+    geom_tile(data = sitech, 
+              aes(x = E, y = N, fill =mean))+
+    scale_fill_continuous(type = "viridis", name = paste(years[i-1]),na.value="grey",limits=c(-0.095,0))+
+    theme(axis.line=element_blank(),axis.text.x=element_blank(),
+          axis.text.y=element_blank(),axis.ticks=element_blank(),
+          axis.title.x=element_blank(),
+          legend.text = element_text(size=12),
+          legend.title= element_text(size=12),
+          axis.title.y=element_blank(),
+          panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),plot.background=element_blank())
 }
 
-plots
+# temporal maps
+tmaps<- ggarrange(plotlist=plots,nrow=2,ncol=3) # map of all temporal changes
+map<- ggarrange(plotlist=list(plots[[1]],plots[[11]],plots[[12]]) ,nrow=1,ncol=3)
+ggsave("temp_plot1.png",plot=  tmaps$`1`,width = 10,height=7)
+ggsave("temp_plot2.png",plot= tmaps$`2`,width = 10,height=7)
+ggsave("temporal_rq.png",plot= map,width = 16,height=7,dpi = 2000)
 
-
-###############################################################
-# Climate Simulation 
-covs2 <- c(base)
-covs2$temp.a <- data.frame(covs2$temp.a)
-l1 <- covs2$temp.a>0
-covs2$temp.a[l1] <- covs2$temp.a[l1]*0.1
- 
-# parameters for simulation
-psi1 <- sim.pop(psi.start = 0.50,
-                gamma = gamma,
-                alpha = alpha.phi,
-                psi = array(dim = c(iterations.,sites,time)),
-                cov.array = f_array(covs))
-
-psi2 <- sim.pop(psi.start = 0.50,
-                gamma = gamma,
-                alpha = alpha.phi,
-                psi = array(dim = c(iterations.,sites,time)),
-                cov.array = f_array(covs2))
-
-
-c1 <- summ(psi1,year=seq(1994,2018,2))
-c1$name <- "With pesticide"
-c2 <- summ(psi2,year = seq(1994,2018,2)) 
-c2$name <- "Without pesticide"
-
-c <- rbind(c1,c2)
-
-library(ggplot2)
-ggplot(data=c)+geom_line(aes(x=year,y=mean,color=name),size=1)+
-  geom_ribbon(aes(x=year,ymin=lb,ymax=ub,fill=name),alpha=0.2)+ylim(0,1)+
-  theme(
-    panel.grid.major = element_blank(), 
-    panel.grid.minor = element_blank(),
-    panel.background = element_blank(),
-    axis.line = element_line(colour = "black"),
-  )+ylab("Occupancy")+xlab("Year")
-
-slope <- function(x){
-  l <- dim(x)[1]
-  time <- dim(x)[3]
   
-  out <- array(dim=c(l,dim(x)[2],time-1))
-  
-  for(i in 1:l){
-    
-    out[i,,]  <- (x[i,,-1]-x[i,,1:12])/2
-    
-  }
-  out
-}
-
-s1 <- slope(psi1)
-s2 <- slope(psi2)
-
-diff_s <- s1-s2
-diffc<-  psi1-psi2
-c2 <- summ(diff_s,year = seq(1996,2018,2)) 
-c3 <- summ(diffc,year = seq(1994,2018,2)) 
-
-ggplot(data=c2)+geom_point(aes(x=year,y=mean))+
-  geom_errorbar(aes(x=year,ymin=lb,ymax=ub),alpha=0.2)+geom_hline(yintercept = 0,linetype="dashed")+
-  theme(
-    panel.grid.major = element_blank(), 
-    panel.grid.minor = element_blank(),
-    panel.background = element_blank(),
-    axis.line = element_line(colour = "black"),
-  )+ylab("Difference in slopes")+xlab("Year")
-
-ggplot(data=c3)+geom_point(aes(x=year,y=mean))+
-  geom_errorbar(aes(x=year,ymin=lb,ymax=ub),alpha=0.2)+geom_hline(yintercept = 0,linetype="dashed")+
-  theme(
-    panel.grid.major = element_blank(), 
-    panel.grid.minor = element_blank(),
-    panel.background = element_blank(),
-    axis.line = element_line(colour = "black"),
-  )+ylab("Difference in occupancy")+xlab("Year")
 ############################################################################
+##################### Persistence (%) Marginal Effects #####################
+############################################################################
+covsr <- readRDS("covars_wide.rds")
 
-# site level changes between the first and the last year
-sitec <- summs(diffc,year = 13)
+# temperature spatial marginal effect ######################################
+temps <- covsr$temp_anom[-1]+covsr$mean_temp[-1] # non standardized temperatures
 
-site_id <- read.csv("site_id.csv")[2]
-sitecc <- cbind(sitec,site_id)
-coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
-sitecc <- left_join(sitecc,coord )
+me <-mean(as.matrix( covsr$mean_temp[-1])) # mean
+mn<- min(covsr$mean_temp[-1])-me # centered minimum temperature
+mx<- max(covsr$mean_temp[-1])-me # centered minimum temperature
 
-ggplot() +
-  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
-  ylim(0, 700000)  + geom_tile(data = sitecc, 
-                               aes(x = E, y = N, fill =mean))+
-  scale_fill_continuous(type = "viridis", name = "Change in occupancy")+ theme(panel.grid.major = element_blank(), 
-                                                                                     panel.grid.minor = element_blank(),
-                                                                                     panel.background = element_blank())
+# intercept
+alpha = alpha.phi
+
+# values used to predict
+pout <- seq(mn,mx, length.out =100)
+
+# predict persistence
+phi <-  apply( t(matrix(ncol=iterations.,nrow=100,(pout))) *beta[,1] ,2,function(x){inv_logit_scaled( x+alpha)})
+
+sphi <- summp(phi)
+
+# plot persistence
+tmp <- ggplot(data=sphi)+geom_line(aes(x=pout+me,y=mean*100),size=1)+
+  geom_ribbon(aes(x=pout+me,ymin=lb*100,ymax=ub*100),alpha=0.2)+
+  geom_vline(xintercept =me,color="black",linetype="dashed") +
+  
+  theme(        axis.text.y = element_text(size=10),
+                axis.text.x=  element_text(size=10),
+                axis.title.x= element_text(size=11), 
+                axis.title.y =element_text(size=11),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                panel.background = element_blank(),
+                axis.line = element_line(colour = "black"),
+  )+ylab("Persistence (%)")+xlab("Mean Temperature (C)")
+
+ggsave("tmpr_eff.png",plot= tmp,width = 6,height=3)
+
+# temperature temporal marginal effect #########################################
+temps <- covsr$temp_anom[-1] # non standardized temperatures
+
+me <- mean(as.matrix(temps)) # mean
+min <- min(temps)
+max <- max(temps)
+
+mn <- min # centered minimum temperature
+mx <- max 
+
+# intercept
+alpha = alpha.phi
+
+# values used to predict
+pout <- seq(mn,mx, length.out =100)
+
+# predict persistence
+phi <-  apply( t(matrix(ncol=iterations.,nrow=100,(pout))) *beta[,2] ,2,function(x){inv_logit_scaled( x+alpha)})
+
+sphi <- summp(phi)
+
+# plot persistence
+tmp <- ggplot(data=sphi)+geom_line(aes(x=pout+me,y=mean*100),size=1)+
+  geom_ribbon(aes(x=pout+me,ymin=lb*100,ymax=ub*100),alpha=0.2)+
+  geom_vline(xintercept =me,color="black",linetype="dashed") +
+  
+  theme(        axis.text.y = element_text(size=10),
+                axis.text.x=  element_text(size=10),
+                axis.title.x= element_text(size=11), 
+                axis.title.y =element_text(size=11),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                panel.background = element_blank(),
+                axis.line = element_line(colour = "black"),
+  )+ylab("Persistence (%)")+xlab("Mean Temperature (C)")
+
+ggsave("tmpr_eff.png",plot= tmp,width = 6,height=3)
+
+# risk temporal marginal effect ##############################################
+rq <- covsr$RQsum_A[-1]+covsr$RQsum_M[-1] # non standardized risk quotient
+
+me=mean(as.matrix(rq)) # mean
+mx=max(rq)-mean(as.matrix(rq))  # centred maximum
+mn=min(rq)-mean(as.matrix(rq)) # centred minimum
 
 
+per<-(((seq(mn,mx, length.out =200)+me)-me)/me)*100 # anomalies expressed as a percentage
+
+# calculate persistence
+phi <-  apply( t(matrix(ncol=iterations.,nrow=200,(seq(mn,mx, length.out =200)))) *beta[,5] ,2,function(x){inv_logit_scaled( x+alpha)})
+
+# summarize persistence
+spout <- summp(phi)
+nf<- quantile(((rq/covsr$RQsum_M[-1])/covsr$RQsum_M[-1])*100,0.95,na.rm=T) # upper 95CI
+
+me=mean(as.matrix(rq))
+
+rqap<-ggplot(data=spout)+geom_line(aes(x=per,y=mean*100),size=1)+
+  geom_ribbon(aes(x=per,ymin=lb*100,ymax=ub*100),alpha=0.2)+
+  geom_vline(xintercept =nf,color="red",linetype="dashed") +
+  geom_vline(xintercept =-100,color="red",linetype="dashed") +
+  geom_vline(xintercept =0,color="black",linetype="dashed") +
+  theme(    axis.text.y = element_text(size=10),
+            axis.text.x=  element_text(size=10),
+            axis.title.x= element_text(size=11), 
+            axis.title.y =element_text(size=11),
+            
+            panel.grid.major = element_blank(), 
+            panel.grid.minor = element_blank(),
+            panel.background = element_blank(),
+            axis.line = element_line(colour = "black"),
+  )+ylab("Persistence (%)")+xlab("Percentage change in risk quotient at a site (%)")
+
+ggsave("rqap.png",plot= rqap,width = 6,height=5)
+
+# semi natural marginal effect ##############################################
+semi <- covsr$semi[-1]
+mx=max(semi)-mean(as.matrix(semi))
+mn=min(semi)-mean(as.matrix(semi))
+max <-max(semi)
+min <-min(semi)
+phi <-  apply( t(matrix(ncol=iterations.,nrow=200,(seq(mn,mx, length.out =200)))) *beta[,3] ,2,function(x){inv_logit_scaled( x+alpha)})
+
+sephi <- summp(phi)
 
 
+me=mean(as.matrix(semi))
 
+semip <- ggplot(data=sephi)+geom_line(aes(x=seq(min,max, length.out =200),y=mean*100),size=1)+
+  geom_ribbon(aes(x=seq(min,max, length.out =200),ymin=lb*100,ymax=ub*100),alpha=0.2)+
+  geom_vline(xintercept =me,color="black",linetype="dashed") +
+  
+  theme(        axis.text.y = element_text(size=10),
+                axis.text.x=  element_text(size=10),
+                axis.title.x= element_text(size=11), 
+                axis.title.y =element_text(size=11),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                panel.background = element_blank(),
+                axis.line = element_line(colour = "black"),
+  )+ylab("Persistence (%)")+xlab("Percentage semi-natural land cover")
+semip
+ggsave("semi_eff.png",plot= semip,width = 6,height=3)
+
+
+# agriculture marginal effect #######################################
+
+agri <- covsr$agri[-1]
+mx=max(agri)-mean(as.matrix(agri))
+mn=min(agri)-mean(as.matrix(agri))
+max=max(agri)
+min=min(agri)
+me=mean(as.matrix(agri))
+agphi <-  apply( t(matrix(ncol=iterations.,nrow=200,(seq(mn,mx, length.out =200)))) *beta[,3] ,2,function(x){inv_logit_scaled( x+alpha)})
+agphi <- summp(agphi)
+
+agrip <- ggplot(data=agphi)+geom_line(aes(x=seq(min,max, length.out =200),y=mean*100),size=1)+
+  geom_ribbon(aes(x=seq(min,max, length.out =200),ymin=lb*100,ymax=ub*100),alpha=0.2)+
+  geom_vline(xintercept =me,color="black",linetype="dashed") +
+  
+  theme(        axis.text.y = element_text(size=10),
+                axis.text.x=  element_text(size=10),
+                axis.title.x= element_text(size=11), 
+                axis.title.y =element_text(size=11),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                panel.background = element_blank(),
+                axis.line = element_line(colour = "black"),
+  )+ylab("Persistence (%)")+xlab("Agricultural land cover")
+agrip
+
+######################
+rq <- covsr$agri[-1]
+mx=max(rq)-mean(as.matrix(rq))
+mn=min(rq)-mean(as.matrix(rq))
+max=max(rq)
+min=min(rq)
+phi <-  apply( t(matrix(ncol=iterations.,nrow=200,(seq(mn,mx, length.out =200)))) *beta[,4] ,2,function(x){inv_logit_scaled( x+alpha)})
+
+b1.1 <- summp(phi)
+b2 <- summp(data.frame( inv_logit_scaled(alpha)))
+
+b1$Landcover <- "Semi-natural"
+b1$x <- seq(min,max, length.out =200)
+b1.1$Landcover <- "Agriculture"
+b1.1$x <- seq(min,max, length.out =200)
+
+
+me=mean(as.matrix(rq))
+
+
+b1 <- rbind(b1,b1.1)
+b1$Landcover <-as.factor(b1$Landcover)
+
+ggplot(data=b1)+geom_line(aes(x=x,y=mean , color=Landcover )  ,size=1)+
+  geom_ribbon(aes(x=x,ymin=lb,ymax=ub,fill=Landcover ),alpha=0.2)+
+  theme(        axis.text.y = element_text(size=10),
+                axis.text.x=  element_text(size=10),
+                axis.title.x= element_text(size=11), 
+                axis.title.y =element_text(size=11),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                panel.background = element_blank()
+  )+ylab("Persistence (%)")+xlab("Percentage land cover")
+ggsave("semi_eff.png",plot= semi,width = 6,height=5)
+
+################################################################################
+# PP check #####################################################################
+total_obs <- cbind(occ=rowSums( jas_data[[1]][-1]),jas_data[[2]])%>%
+  group_by(site_5km,TP)%>%summarise(total=sum(occ))
+plot(density(log(total_obs$total+0.1)))

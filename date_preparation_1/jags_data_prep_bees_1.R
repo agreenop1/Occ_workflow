@@ -81,7 +81,7 @@ RQ$rq_A_pol <- RQ$pollinators_RQ - RQ$rq_M_pol
 RQ$rq_A_pre <- RQ$predators_RQ - RQ$rq_M_pre
 RQ$rq_A_ppl <- RQ$predators_pollinators_RQ - RQ$rq_M_ppl
 
-# zero application
+# zero application - used in simulations
 zero_app <- data.frame(RQ[1:4],rqpol=0-RQ$rq_M_pol,
                        rqpre=0-RQ$rq_M_pre,
                        rqppl=0-RQ$rq_M_ppl)
@@ -308,11 +308,13 @@ names(covars_id)[i] <- var.names[[i]]
 }
 
 
-z1 <- var_prep(zero_app,var.x="rqpol", site="gr", keep.id=T,center=F)
-z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pol", site="gr", keep.id=T,center=F)
-saveRDS(list(z1=z1,z0=z0),"zero_app.rds")
+# covariates used in simulations
+z1 <- var_prep(zero_app,var.x="rqpol", site="gr", keep.id=T,center=F) # zero application wide format
+z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pol", site="gr", keep.id=T,center=F) # actual application rq temporal
+saveRDS(list(zero_application=z1,actual=z0),"zero_app.rds") 
 write.csv(covars_id$temp_anom,"site_id.csv")
 saveRDS(covars_id,"covars_wide.rds")
+
 # double check all covs are in the right order
 for (i in 1:length(covars_id)){
   if(!all(covars_id[[i]]$gr==site_id$site_name)){stop("covs are not in the right order")}
