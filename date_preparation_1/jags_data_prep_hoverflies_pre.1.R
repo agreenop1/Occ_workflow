@@ -112,7 +112,7 @@ cov_assess <- c(list(temp_anom=env_cov$temp_anom,
 scale_bin <- c(F,T,T,T,F,T,T,T)
 
 var.x <- c("mean.x","mean.x","mean.x","mean.x",
-           "rq_A_pol","rq_M_pol","temperature","pollinators_RQ") # variable of interest CHECK!
+           "rq_A_pre","rq_M_pre","temperature","predators_RQ") # variable of interest CHECK!
 
 
 #################################################################  
@@ -320,11 +320,11 @@ for (i in 1:length(var.names)){
 
 
 # covariates used in simulations
-z1 <- var_prep(zero_app,var.x="rqpol", site="gr", keep.id=T,center=F) # zero application wide format
-z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pol", site="gr", keep.id=T,center=F) # actual application rq temporal
-saveRDS(list(zero_application=z1,actual=z0),"zero_app_hovpol.rds") 
+z1 <- var_prep(zero_app,var.x="rqpre", site="gr", keep.id=T,center=F) # zero application wide format
+z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pre", site="gr", keep.id=T,center=F) # actual application rq temporal
+saveRDS(list(zero_application=z1,actual=z0),"zero_app_hovpre.rds") 
 write.csv(covars_id$temp_anom,"site_id.csv")
-saveRDS(covars_id,"covars_wide_hovpol.rds")
+saveRDS(covars_id,"covars_wide_hovpre.rds")
 
 # double check all covs are in the right order
 for (i in 1:length(covars_id)){
@@ -518,7 +518,7 @@ cat("Minimum observations",obs.n,"\n")
 cat(nrow(site_id),"sites","\n")
 cat(ncol(occup[-1]),"species","\n")
 
-cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"pol",".rds"),"\n")
+cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"pre",".rds"),"\n")
 
 
 saveRDS(list(occup,visit,zobs,covars,closure.period),file.name)

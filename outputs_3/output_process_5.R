@@ -696,9 +696,3 @@ ggplot(data=b1)+geom_line(aes(x=x,y=mean , color=Landcover )  ,size=1)+
                 panel.background = element_blank()
   )+ylab("Persistence (%)")+xlab("Percentage land cover")
 ggsave("semi_eff.png",plot= semi,width = 6,height=5)
-
-################################################################################
-# PP check #####################################################################
-total_obs <- cbind(occ=rowSums( jas_data[[1]][-1]),jas_data[[2]])%>%
-  group_by(site_5km,TP)%>%summarise(total=sum(occ))
-plot(density(log(total_obs$total+0.1)))
