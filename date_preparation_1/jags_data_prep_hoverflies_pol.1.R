@@ -511,7 +511,20 @@ for (i in 1:length(covars_id)){
 }
 
 if(!all(dimnames(zobs)[[1]]==colnames(occup[-1]))){cat("check species names are in the correct order")}
+#########################################################################
+# region observation 
+region <-distinct( read.csv("osr_pesticide_5km_1994_2010_v3.csv")[c("ref_5km","region")]) 
+region$region <- tolower(region$region)
+region <-distinct(region) 
+region$region.n <- as.numeric(as.factor(region$region))
+colnames(region)[1] <- "site_5km"
+visit <- left_join(visit,region[c("site_5km","region")])
 
+# region ecological
+region.cov <- left_join(data.frame(site_5km=rownames(zobs[1,,])),region)
+
+# order check
+if(!all(rownames(zobs[1,,])==region.cov$site_5km)) { cat("check sites are in the correct order")}
 #########################################################################
 # save outputs
 cat("Minimum observations",obs.n,"\n")
@@ -521,4 +534,4 @@ cat(ncol(occup[-1]),"species","\n")
 cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"pol",".rds"),"\n")
 
 
-saveRDS(list(occup,visit,zobs,covars,closure.period),file.name)
+saveRDS(list(occup,visit,zobs,covars,closure.period,region=region.cov),file.name)

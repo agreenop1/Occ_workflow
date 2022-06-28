@@ -15,9 +15,9 @@ source("brcmap_f.R")
 UK <-  readRDS("UK_map.rds")
 # closure period 1 = yearly and 2 = biennial 
 # Lag determines whether the covariates for t (lag = T) or t-1 are used to predict persistence
-
+i
 closure.period=2
-
+years_n <- seq(1994,2016,2)
 # If lag = T then occupancy (z) for time period t is dependent on z in t-1 & persistence driven by covariates in t-1.
 # Here t is either equal to a year or every 2 years dependent on closure period.
 # We need occurence records spanning 1st time period we have covariates (t1) to the last time period + t (ti+t),
@@ -296,6 +296,41 @@ visit$LONG <- 0
 visit$LONG[visit$L>3] <- 1
 
 #########################################################################
+# species plots
+coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
+hover <- read.csv("hoverfly_names.csv")
+keep_names <- hover$species[hover$tribe=="Bacchini"] # Bacchini Eristalini
+unique(hov_names$tribe)
+occ_record <- cbind(occ_tot=rowSums( occup[keep_names]),visit)
+occ_map <- occ_record %>% group_by(TP,site_5km) %>% summarise(occ_sum=occ_tot)
+colnames(occ_map)[2] <- 'gr'
+
+occ_map <- left_join(occ_map,coord)
+ 
+ 
+out <- list()
+
+for(i in 1:12){
+    
+    sy <- occ_map[occ_map$TP==i,]
+    
+    sy <- sy[sy$occ_sum>0,]
+  
+    
+    out[[i]] <- ggplot() +
+      geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+      ylim(0, 700000)  + geom_tile(data = sy, 
+                                   aes(x = E, y = N, fill =occ_sum))+
+      scale_fill_continuous(type = "viridis", name = years_n[[i]])+ theme(panel.grid.major = element_blank(), 
+                                                                          panel.grid.minor = element_blank(),
+                                                                          panel.background = element_blank())
+}
+  
+  out
+10
+
+names(env_plots) <- names(id_plots)
+#########################################################################
 # make sure occupancy and visit data match
 if(all(occup$visit==visit$visit)){"Occupancy and visit data match"}
 
@@ -340,7 +375,7 @@ for (i in 1:length(var.names)){
 }
 #########################################################################
 # plots 
-coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
+
 
 id_plots <- lapply(covars_id,function(x){left_join(x,coord)})
 
@@ -353,7 +388,7 @@ env_plots <- lapply (1:6,function(x1){
     
     sy <- x1[c("E","N",years_n[[i]])]
     
-    sy <- sy[sample(1:2000,500),]
+    
     colnames(sy)[1:3] <- c("E","N","Year")
     
     out[[i]] <- ggplot() +

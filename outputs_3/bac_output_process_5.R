@@ -20,7 +20,8 @@ para <- c("mu.beta","gamma","beta","init.occ","mu.alpha.phi","mu.gamma","alpha.p
 data="hoverflies"
 
 tribe= "Bacchini"
-group = 'hoverflies_pre'
+group = 'hoverflies_'
+type="pre"
 mod =paste0( "all_",tribe)
 cat(mod,group,"\n")
 
@@ -30,7 +31,7 @@ unique(hover$tribe)
 keep_names <- hover$species[hover$tribe==tribe]
 
 # species in order they are in occ dataframe!
-jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016pol.rds"))
+jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016",type,".rds"))
 
 
 occ <- jas_data[[1]][-1]
@@ -61,8 +62,9 @@ base <- list(temp.m=covars$mean_temp,temp.a=covars$temp_anom,semi=covars$semi,ag
 #                  it.used=its,
 #                  iterations=1000,verbose=T)
 #
-occ_output <- readRDS("jas_out/all_Bacchini_hoverflies_pol_summary.rds")
+occ_output <- readRDS(paste0("jas_out/all_Bacchini_hoverflies_",type,"_summary.rds"))
 out <- occ_output
+
 
 
 
@@ -90,12 +92,12 @@ alpha <- out$sims.list$alpha.phi[1:nrep,] # intercepts
 
 # estimates of population occupancy for species
 psi <- sim.pop(psi.start = init,
-                gamma = gamma,
-                beta = beta,
-                alpha = alpha,
-                psi =  array(dim=c(nrep,species,sites,time)),
-                cov.array = f_array(covs),
-                species=T)
+               gamma = gamma,
+               beta = beta,
+               alpha = alpha,
+               psi =  array(dim=c(nrep,species,sites,time)),
+               cov.array = f_array(covs),
+               species=T)
 
 # predict occupancy state
 popbin <- apply(psi,c(2,3,4),function(x){rbinom(length(x),1,x)})
@@ -119,39 +121,41 @@ LONG <- observed$LONG
 nobs <- length(SHORT) # number of observations
 site <- observed$site_5km.n 
 closure <- observed$TP
-y <- array(dim=c(nrep,nobs,species)) # predicted observations
-p <- array(dim=c(nrep,nobs,species)) # probability occupancy
+y <- array(dim=c(nobs,species),0) # predicted observations
+p <- array(dim=c(nobs,species)) # probability occupancy
 
+# aggregate all observations seen at a site
+yrep <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=0)
+y_sum <- cbind(y_sum=sum(yrep$obs_count),rep=0)
 
 # observation model
 for(i in 1:nrep){
   for(o in 1:nobs){
- 
+    
     # observation probability  
-    p[i,o,] <- inv_logit_scaled( alpha.p[i,closure[o]] + d1[i,] + d2[i,]*SHORT[o] +
-      d3[i,]*LONG[o])
+    p[o,] <- inv_logit_scaled( alpha.p[i,closure[o]] + d1[i,] + d2[i,]*SHORT[o] +
+                                 d3[i,]*LONG[o])
     
     # predicted occupancy
-    y[i,o,] <- rbinom(species,1,popbin[i,,site[o],closure[o]]*p[i,o,])
+    y[o,] <- rbinom(species,1,popbin[i,,site[o],closure[o]]*p[o,])
     
   }
-  colnames(y[i,,]) <- colnames(occ)
+  colnames(y) <- colnames(occ) 
+  yreps <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=i)
+  y_sum_i <- cbind(y_sum=sum(yreps$obs_count),rep=i)
+  yrep <- rbind(yrep,yreps)
+  y_sum <- rbind(y_sum,y_sum_i )  
 }
 
-# aggregate all observations seen at a site
-yrep <- cbind(obs_count= rowSums(y[1,,]),vis[c("site_5km","TP")],rep=1)
-
-for(i in 1:nrep){
-        
-      yreps <- cbind(obs_count= rowSums(y[i,,]),vis[c("site_5km","TP")],rep=i)
-      
-      yrep <- rbind(yrep,yreps)
-                       
-}
 
 # look at predicted values vs. real values
-ggplot() + geom_density(data=yrep,aes(x=obs_count,group=as.factor(rep)),adjust=3)+
-  geom_density(aes(x=rowSums(occ)),color="blue", adjust=3)
+yrep <- yrep[yrep$rep!=0,]
+y_sum <- y_sum[-1,]
+ggplot() + geom_density(data=yrep,aes(x=obs_count,group=as.factor(rep)),adjust=2.5)+
+  geom_density(aes(x=rowSums(occ)),color="blue", adjust=2.5)
+
+ggplot() + geom_histogram(data=as.data.frame(y_sum),aes(x=y_sum),bins =40)+
+  geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")
 
 
 # state model only
@@ -172,13 +176,13 @@ occres1 <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=1,t
 for(i in 1:nrep){
   for(t in 1:time){
     
-   pop1 <- popbin[i,,,t]
-   zi <- z[,,t]
-   zi[is.na(zi)] <- 0
-   pop1[zi==0] <- 0
-   occres <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=i,tp=t)
-   occres1 <- rbind(occres1,occres)
-   
+    pop1 <- popbin[i,,,t]
+    zi <- z[,,t]
+    zi[is.na(zi)] <- 0
+    pop1[zi==0] <- 0
+    occres <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=i,tp=t)
+    occres1 <- rbind(occres1,occres)
+    
   }
 }
 
@@ -187,10 +191,12 @@ ggplot() + geom_density(data=occres1,aes(x=log(sr),group=as.factor(rep)))+geom_d
 ggplot() + geom_density(data=occres1,aes(x=sr_diff,group=as.factor(rep)))
 ggplot() + geom_histogram(data=occres1,aes(x=sr_diff))
 quantile(occres1$sr_diff,0.10)
-###############################################################
-##################### Diagnostic Plots ########################
-###############################################################
 
+################################################################################
+########################### Diagnostic Plots ###################################
+################################################################################
+
+# model 
 species <- colnames(occ)
 nspecies <- length(species)
 out <- occ_output
@@ -209,7 +215,6 @@ parameters=c("mu.beta")
 # output <- summary_chains(out,comb.chain = T,keep.samples = F)
 options(max.print=10000);print(out)
 
-# model 
 samples = out$samples
 occ.sum <- data.frame(round(out$summary,3))
 con.f <- occ.sum[occ.sum$Rhat>1.05,] # check parameter convergence
@@ -220,7 +225,7 @@ samp.df <- ggmcmc::ggs(samples) # all samples
 # par.p plots all parameters above - mainly diagnostics -  should detect each type of parameter okay
 # parameters need to be a vector of names
 par.p <-sapply(parameters,output_plots,USE.NAMES=T,simple=F)
-par.p
+par.pe
 
 
 # save plots
@@ -279,7 +284,7 @@ init <- out$sims.list$init.occ
 
 # alpha.phi - intercept
 alpha.phi <- out$sims.list$mu.alpha.phi[1:iterations.]
- 
+
 
 # RISK QUOTIENT SPATIAL EFFECT
 # covariates
@@ -314,7 +319,7 @@ psi2 <- sim.pop(psi.start = 0.50,
                 psi = array(dim = c(iterations.,sites,time)),
                 cov.array = f_array(covs1),
                 species=F
-                )
+)
 
 # summarize all sites by year
 m1 <- summ(psi1,year=seq(1994,2018,2))
@@ -326,18 +331,18 @@ m <- rbind(m1,m2)
 
 # occupancy by year
 ggplot(data=m)+geom_line(aes(x=year,y=mean,color=name),size=1)+
-         geom_ribbon(aes(x=year,ymin=lb,ymax=ub,fill=name),alpha=0.2)+ylim(0,1)+
+  geom_ribbon(aes(x=year,ymin=lb,ymax=ub,fill=name),alpha=0.2)+ylim(0,1)+
   theme(
-        panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(),
-        axis.line = element_line(colour = "black"),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black"),
   )+ylab("Occupancy")+xlab("Year")
 
 # difference risk quotient scenarios
 diffp <-  psi1-psi2
 
- 
+
 diffsum <- summ(diffp,year = seq(1994,2018,2)) 
 
 # difference plot
@@ -501,7 +506,7 @@ ggsave("temp_plot1.png",plot=  tmaps$`1`,width = 10,height=7)
 ggsave("temp_plot2.png",plot= tmaps$`2`,width = 10,height=7)
 ggsave("temporal_rq.png",plot= map,width = 16,height=7,dpi = 2000)
 
-  
+
 ############################################################################
 ##################### Persistence (%) Marginal Effects #####################
 ############################################################################

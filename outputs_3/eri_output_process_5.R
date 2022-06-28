@@ -20,7 +20,7 @@ para <- c("mu.beta","gamma","beta","init.occ","mu.alpha.phi","mu.gamma","alpha.p
 data="hoverflies"
 
 tribe= "Eristalini"
-group = 'hoverflies_pre'
+group = 'hoverflies_pol'
 mod =paste0( "all_",tribe)
 cat(mod,group,"\n")
 
@@ -117,39 +117,41 @@ LONG <- observed$LONG
 nobs <- length(SHORT) # number of observations
 site <- observed$site_5km.n 
 closure <- observed$TP
-y <- array(dim=c(nrep,nobs,species)) # predicted observations
-p <- array(dim=c(nrep,nobs,species)) # probability occupancy
+y <- array(dim=c(nobs,species),0) # predicted observations
+p <- array(dim=c(nobs,species)) # probability occupancy
 
+# aggregate all observations seen at a site
+yrep <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=0)
+y_sum <- cbind(y_sum=sum(yrep$obs_count),rep=0)
 
 # observation model
 for(i in 1:nrep){
   for(o in 1:nobs){
- 
+    
     # observation probability  
-    p[i,o,] <- inv_logit_scaled( alpha.p[i,closure[o]] + d1[i,] + d2[i,]*SHORT[o] +
-      d3[i,]*LONG[o])
+    p[o,] <- inv_logit_scaled( alpha.p[i,closure[o]] + d1[i,] + d2[i,]*SHORT[o] +
+                                 d3[i,]*LONG[o])
     
     # predicted occupancy
-    y[i,o,] <- rbinom(species,1,popbin[i,,site[o],closure[o]]*p[i,o,])
+    y[o,] <- rbinom(species,1,popbin[i,,site[o],closure[o]]*p[o,])
     
   }
-  colnames(y[i,,]) <- colnames(occ)
+  colnames(y) <- colnames(occ) 
+  yreps <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=i)
+  y_sum_i <- cbind(y_sum=sum(yreps$obs_count),rep=i)
+  yrep <- rbind(yrep,yreps)
+  y_sum <- rbind(y_sum,y_sum_i )  
 }
 
-# aggregate all observations seen at a site
-yrep <- cbind(obs_count= rowSums(y[1,,]),vis[c("site_5km","TP")],rep=1)
-
-for(i in 1:nrep){
-        
-      yreps <- cbind(obs_count= rowSums(y[i,,]),vis[c("site_5km","TP")],rep=i)
-      
-      yrep <- rbind(yrep,yreps)
-                       
-}
 
 # look at predicted values vs. real values
-ggplot() + geom_density(data=yrep,aes(x=obs_count,group=as.factor(rep)),adjust=3)+
-  geom_density(aes(x=rowSums(occ)),color="blue", adjust=3)
+yrep <- yrep[yrep$rep!=0,]
+y_sum <- y_sum[-1,]
+ggplot() + geom_density(data=yrep,aes(x=obs_count,group=as.factor(rep)),adjust=2.5)+
+  geom_density(aes(x=rowSums(occ)),color="blue", adjust=2.5)
+
+ggplot() + geom_histogram(data=as.data.frame(y_sum),aes(x=y_sum),bins =40)+
+  geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")
 
 
 # state model only

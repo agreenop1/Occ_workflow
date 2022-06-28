@@ -15,21 +15,35 @@ UK <-  readRDS("UK_map.rds")
 para <- c("mu.beta","gamma","beta","init.occ","mu.alpha.phi","mu.gamma","alpha.phi",
           "dtype1.p","dtype2.p","dtype3.p","alpha.p")
 
-# start of file name
-file="3_bee" 
 
 # read in data with cover it information
-data="bees"
+data="hoverflies"
 
+tribe= "Syrphini"
+group = 'hoverflies_pol'
+mod =paste0( "all_",tribe)
+cat(mod,group,"\n")
+
+
+hover <- read.csv("hoverfly_names.csv")
+unique(hover$tribe)
+keep_names <- hover$species[hover$tribe==tribe]
 
 # species in order they are in occ dataframe!
-jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016.rds"))
+jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016pol.rds"))
+
+
+occ <- jas_data[[1]][-1]
+# remove id column
+occ <- occ[c(keep_names)]
+vis <- jas_data[[2]]
+occdat <- cbind(occ,vis) 
+
 
 # the number of sites and number of time periods
 time = 13
-sites = 2278
-species = ncol(jas_data[[1]][-1])
-
+sites = nrow(jas_data[[4]]$temp_anom)
+species = ncol(occ)
 # number of iterations in each file
 its <- c(500)
 
@@ -47,12 +61,10 @@ base <- list(temp.m=covars$mean_temp,temp.a=covars$temp_anom,semi=covars$semi,ag
 #                  it.used=its,
 #                  iterations=1000,verbose=T)
 #
-occ_output <- readRDS("jas_out/summary_ps.rds")
-out <- occ_output[[2]]
+occ_output <- readRDS(paste0("jas_out/all_",tribe,"_hoverflies_pol_summary.rds"))
+out <- occ_output
 
-
-
-
+cat((nrow(out$sims.list$alpha.phi)*5)/3,"iterations used before thin per chain","\n")
 
 #################################################################
 ############# PP Checks #########################################
@@ -60,20 +72,14 @@ out <- occ_output[[2]]
 # State Model
 # aggregate observations where a species was observed at a site
 
-occ <- jas_data[[1]][-1]
-vis <- jas_data[[2]]
-occdat <- cbind(occ,vis) 
-species <- colnames(jas_data[[1]][-1])
-nspecies <- length(species)
-
 
 # simulation
 covs <- c(base) # covariate list
 
 
 #  multiple species check
-nrep <- 150 #dim(out$sims.list$beta)[1]
-popocc <- array(dim=c(nrep,nspecies,sites,time)) # occupancy estimates
+nrep <- 50 #dim(out$sims.list$beta)[1]
+popocc <- array(dim=c(nrep,species,sites,time)) # occupancy estimates
 beta <- out$sims.list$beta[1:nrep,,] # beta coefficient
 gamma <-  out$sims.list$gamma[1:nrep,] # colonization
 init <-  out$sims.list$init.occ[1:nrep,] # initial occupancy
@@ -85,18 +91,19 @@ psi <- sim.pop(psi.start = init,
                 gamma = gamma,
                 beta = beta,
                 alpha = alpha,
-                psi =  array(dim=c(nrep,nspecies,sites,time)),
+                psi =  array(dim=c(nrep,species,sites,time)),
                 cov.array = f_array(covs),
                 species=T)
 
 # predict occupancy state
 popbin <- apply(psi,c(2,3,4),function(x){rbinom(length(x),1,x)})
-rm(psi)
+
 # observed occupancy
 z <- jas_data[[3]]
+z <- z[keep_names,,]
 
 # observation model
-out <- occ_output[[3]]
+out <- occ_output
 alpha.p <- out$sims.list$alpha.p
 d1 <- out$sims.list$dtype1.p
 d2 <- out$sims.list$dtype2.p
@@ -110,8 +117,8 @@ LONG <- observed$LONG
 nobs <- length(SHORT) # number of observations
 site <- observed$site_5km.n 
 closure <- observed$TP
-y <- array(dim=c(nobs,nspecies),0) # predicted observations
-p <- array(dim=c(nobs,nspecies)) # probability occupancy
+y <- array(dim=c(nobs,species),0) # predicted observations
+p <- array(dim=c(nobs,species)) # probability occupancy
 
 # aggregate all observations seen at a site
 yrep <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=0)
@@ -120,13 +127,13 @@ y_sum <- cbind(y_sum=sum(yrep$obs_count),rep=0)
 # observation model
 for(i in 1:nrep){
   for(o in 1:nobs){
- 
+    
     # observation probability  
     p[o,] <- inv_logit_scaled( alpha.p[i,closure[o]] + d1[i,] + d2[i,]*SHORT[o] +
-      d3[i,]*LONG[o])
+                                 d3[i,]*LONG[o])
     
     # predicted occupancy
-    y[o,] <- rbinom(94,1,popbin[i,,site[o],closure[o]]*p[o,])
+    y[o,] <- rbinom(species,1,popbin[i,,site[o],closure[o]]*p[o,])
     
   }
   colnames(y) <- colnames(occ) 
@@ -146,11 +153,12 @@ ggplot() + geom_density(data=yrep,aes(x=obs_count,group=as.factor(rep)),adjust=2
 ggplot() + geom_histogram(data=as.data.frame(y_sum),aes(x=y_sum),bins =40)+
   geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")
 
+
 # state model only
 # get where species were observed at a site
 check <- cbind(occ,vis[c("site_5km","TP")]) %>% group_by(site_5km,TP) %>% summarise_all(sum) # observed occupancy
-check[3:96][check[3:96]>0] <- 1
-sr_site <- cbind(total=rowSums( check[3:96]),check[c("site_5km","TP")]) # observed occupancy sr
+check[3:species][check[3:species]>0] <- 1
+sr_site <- cbind(total=rowSums( check[3:species]),check[c("site_5km","TP")]) # observed occupancy sr
 
 # summarise predicted occupancies status
 pop1 <- popbin[1,,,1] # get occupancy status
@@ -158,8 +166,8 @@ zi <- z[,,1] # observed occupancies
 zi[is.na(zi)] <- 0 # set any na to zero
 pop1[zi==0] <- 0 # make sure we only include observations where the species has been observed
 
-occres1 <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=0,tp=1)
-occr <- list() 
+occres1 <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=1,tp=1)
+
 # repeat for reps 
 for(i in 1:nrep){
   for(t in 1:time){
@@ -175,18 +183,19 @@ for(i in 1:nrep){
 }
 
 # plots of model predictive ability
-occres1 <- occres1[occres1$rep==0,]
 ggplot() + geom_density(data=occres1,aes(x=log(sr),group=as.factor(rep)))+geom_density(aes(x=log(sr_site$total)),color="blue")
-eggplot() + geom_density(data=occres1,aes(x=sr_diff,group=as.factor(rep)))
+ggplot() + geom_density(data=occres1,aes(x=sr_diff,group=as.factor(rep)))
 ggplot() + geom_histogram(data=occres1,aes(x=sr_diff))
-quantile(occres1$sr_diff,0.19)
-###############################################################
-##################### Diagnostic Plots ########################
-###############################################################
+quantile(occres1$sr_diff,0.20)
 
-species <- colnames(jas_data[[1]][-1])
+################################################################################
+########################### Diagnostic Plots ###################################
+################################################################################
+
+# model 
+species <- colnames(occ)
 nspecies <- length(species)
-out <- occ_output[[2]]
+out <- occ_output
 
 # names of covariates
 covs <- c("Temperature spatial","Temperature temporal",
@@ -197,12 +206,11 @@ covs <- c("Temperature spatial","Temperature temporal",
 n.cov <- length(covs)
 
 # parameters to check
+parameters=c("mu.beta","d.type1.p","d.type2.p","d.type3.p")
 parameters=c("mu.beta")
-
 # output <- summary_chains(out,comb.chain = T,keep.samples = F)
 options(max.print=10000);print(out)
 
-# model 
 samples = out$samples
 occ.sum <- data.frame(round(out$summary,3))
 con.f <- occ.sum[occ.sum$Rhat>1.05,] # check parameter convergence
@@ -212,7 +220,7 @@ samp.df <- ggmcmc::ggs(samples) # all samples
 
 # par.p plots all parameters above - mainly diagnostics -  should detect each type of parameter okay
 # parameters need to be a vector of names
-par.p <-sapply(parameters,output_plots,USE.NAMES=T)
+par.p <-sapply(parameters,output_plots,USE.NAMES=T,simple=F)
 par.p
 
 
