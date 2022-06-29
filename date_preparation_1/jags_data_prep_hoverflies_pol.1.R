@@ -1,4 +1,5 @@
-#########################################################################################
+
+###################################################################################################################
 # 1. Script and functions to match occupancy in the BRC format to environmental         #
 # covariates to be used in dynamic species occupancy models                             #
 #########################################################################################
@@ -17,7 +18,7 @@ UK <-  readRDS("UK_map.rds")
 # Lag determines whether the covariates for t (lag = T) or t-1 are used to predict persistence
 
 closure.period=2
-
+years_n <- seq(1994,2016,2)
 # If lag = T then occupancy (z) for time period t is dependent on z in t-1 & persistence driven by covariates in t-1.
 # Here t is either equal to a year or every 2 years dependent on closure period.
 # We need occurence records spanning 1st time period we have covariates (t1) to the last time period + t (ti+t),
@@ -237,7 +238,7 @@ if(closure.period==2){
 occ <- formatOccData(taxa = occ.dat$CONCEPT,
                      site = occ.dat$TO_GRIDREF,
                      survey =  occ.dat$TO_STARTDATE,
-                     closure_period = occ.dat$closure_per)
+                     closure_period = occ.dat$closure_per,includeJDay=T)
 
 # reformat to 5km grid
 occ[[2]]$site_5km <- reformat_gr(occ[[2]]$site, 
@@ -247,8 +248,7 @@ occ[[2]]$site_5km <- reformat_gr(occ[[2]]$site,
 occup <- occ[[1]]
 visit <- occ[[2]]
 occup[occup==T] <- 1
-
-#########################################################################
+###############################################
 # remove sites only visited in one TP
 site_vis <- distinct(visit[c("site","TP")])
 site.v.n1  <- data.frame (table(site_vis$site))
@@ -283,7 +283,7 @@ visit$site_5km.n <-  as.numeric(droplevels(as.factor(visit$site_5km))) # assign 
 
 # get each unique site value, actual site name and order based on the numerical value of site in occ data
 
-site_id <- distinct(visit[5:6])
+site_id <- distinct(visit[c("site_5km","site_5km.n")])
 colnames(site_id) <- c("site_name","site_num")
 site_id <- site_id[order(site_id$site_num), ] 
 
@@ -525,6 +525,10 @@ region.cov <- left_join(data.frame(site_5km=rownames(zobs[1,,])),region)
 
 # order check
 if(!all(rownames(zobs[1,,])==region.cov$site_5km)) { cat("check sites are in the correct order")}
+#########################################################################
+# Julian date
+visit$jstan <- visit$Jul_date-mean(visit$Jul_date)
+
 #########################################################################
 # save outputs
 cat("Minimum observations",obs.n,"\n")
