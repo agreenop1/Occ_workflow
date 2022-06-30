@@ -88,7 +88,7 @@ parameters=c("mu.beta","dtype1.p","beta","gamma","alpha.p")
 samples = out$samples
 occ.sum <- data.frame(round(out$summary,3))
 con.f <- occ.sum[occ.sum$Rhat>1.05,] # check parameter convergence
-rhat. <- out$Rhat # all rhat
+rhat <- out$Rhat # all rhat
 
 samp.df <- ggmcmc::ggs(samples) # all samples
 
@@ -97,12 +97,14 @@ samp.df <- ggmcmc::ggs(samples) # all samples
 par.p <-sapply(parameters,output_plots,samp.df = samp.df,rhat=rhat,species_names = species,simple = F)
 
 
-par.p$mu.beta
+names(par.p$mu.beta) <- covs
+par.p$mu.beta$`Risk Quotient spatial`
+
 # save plots
 wid = 6
 hei = 3
 
-par.p$mu.beta
+
 
 # plots of chains, density and parameter estimate 
 
@@ -181,8 +183,8 @@ LONG <- observed$LONG
 nobs <- length(SHORT) # number of observations
 site <- observed$site_5km.n 
 closure <- observed$TP
-y <- array(dim=c(nobs,species),0) # predicted observations
-p <- array(dim=c(nobs,species)) # probability occupancy
+y <- array(dim=c(nobs,nspecies),0) # predicted observations
+p <- array(dim=c(nobs,nspecies)) # probability occupancy
 
 # aggregate all observations seen at a site
 yrep <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=0)
@@ -221,8 +223,8 @@ ggplot() + geom_histogram(data=as.data.frame(y_sum),aes(x=y_sum),bins =40)+
 # state model only
 # get where species were observed at a site
 check <- cbind(occ,vis[c("site_5km","TP")]) %>% group_by(site_5km,TP) %>% summarise_all(sum) # observed occupancy
-check[3:species][check[3:species]>0] <- 1
-sr_site <- cbind(total=rowSums( check[3:species]),check[c("site_5km","TP")]) # observed occupancy sr
+check[3:nspecies][check[3:species]>0] <- 1
+sr_site <- cbind(total=rowSums( check[3:nspecies]),check[c("site_5km","TP")]) # observed occupancy sr
 
 # summarise predicted occupancies status
 pop1 <- popbin[1,,,1] # get occupancy status
