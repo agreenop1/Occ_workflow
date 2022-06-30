@@ -14,6 +14,10 @@ library(ggplot2)
 library(ggpubr)
 source("brcmap_f.R")
 UK <-  readRDS("UK_map.rds")
+
+# create plots
+plots=F
+
 # closure period 1 = yearly and 2 = biennial 
 # Lag determines whether the covariates for t (lag = T) or t-1 are used to predict persistence
 
@@ -308,6 +312,41 @@ zobs[zobs>1] <- 1
 zobs[zobs==-9999] <- NA
 zobs[zobs==0] <- NA # stops conflicts in nimble
 
+#########################################################################
+if(plots){
+# species plots
+coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
+hover <- read.csv("hoverfly_names.csv")
+
+keep_names <- hover$species[hover$tribe%in%unique(hover$tribe)] # Bacchini Eristalini
+
+occ_record <- cbind(occ_tot=rowSums( occup[keep_names]),visit)
+occ_map <- occ_record %>% group_by(TP,site_5km) %>% summarise(occ_sum=occ_tot)
+colnames(occ_map)[2] <- 'gr'
+
+occ_map <- left_join(occ_map,coord)
+
+
+out <- list()
+
+for(i in 1:12){
+  
+  sy <- occ_map[occ_map$TP==i,]
+  
+  sy <- sy[sy$occ_sum>0,]
+  
+  
+  out[[i]] <- ggplot() +
+    geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+    ylim(0, 700000)  + geom_tile(data = sy, 
+                                 aes(x = E, y = N, fill =occ_sum))+
+    scale_fill_continuous(type = "viridis", name = years_n[[i]])+ theme(panel.grid.major = element_blank(), 
+                                                                        panel.grid.minor = element_blank(),
+                                                                        panel.background = element_blank())
+}
+
+out
+}
 ########################################################################
 # covariates with explicit site ID need for checks
 var.names = names(cov_assess)
@@ -339,11 +378,13 @@ for (i in 1:length(var.names)){
   names(covars)[i] <- var.names[[i]]
 }
 #########################################################################
+if(plots){
 # plots 
-coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
+coord <- distinct(read.csv("agcensus.csv",header=T)[2:4]) # read in coordinates for plots 
 
-id_plots <- lapply(covars_id,function(x){left_join(x,coord)})
+id_plots <- lapply(covars_id[1:6],function(x){left_join(x,coord)}) # join covariates with coordinates
 
+# time x space plots for all covariates
 env_plots <- lapply (1:6,function(x1){
   
   x1 <- id_plots[[x1]]
@@ -370,14 +411,14 @@ env_plots <- lapply (1:6,function(x1){
 
 names(env_plots) <- names(id_plots)
 
-p1 <- env_plots[[1]][[4]]
+p1 <- env_plots
 ggsave("pmap.png",plot=p1, dpi=600, dev='tiff',   height=4.5, width=4.5, units="in") 
 
 # FUNCTION ##############################################################
 #  Check for temporal correlation in parameters at sites through years
 pair <- combn( names(id_plots),2)
 
-n_sites  <- nrow(x1)  
+n_sites  <- nrow(site_id)  
 cor_out <- data.frame(matrix(nrow=n_sites,ncol=ncol(pair)))
 
 for(j in 1:ncol(pair)){
@@ -419,33 +460,10 @@ temr_plots <- ggarrange(plotlist=list(rt,ar,ta,st,sr,sa),nrow=3,ncol=2)
 
 ggsave("check_plot/temporal_plot.png",temr_plots, width = 7,height=8)
 
-##########################################################################
-# variable trends over time
-time_trends <- lapply(covars_id,function(x){
-  
-  # remove tile column
-  cx <- x[-1]
-  cx_out <- data.frame(matrix(ncol = 3,nrow = 12))
-  
-  # get mean and 95 credible intervals
-  cx_out[,1] <- apply(cx,2,mean)
-  cx_out[,2] <- apply(cx,2,quantile,probs = 0.025)
-  cx_out[,3] <- apply(cx,2,quantile,probs = 0.975)
-  cx_out
-})
-
-
-
-tpt <- ggplot(time_trends[[1]],aes(x=seq(1994,2016,2),y=X1))+geom_line()+geom_errorbar(aes(ymin=X2, ymax=X3)) +xlab("Years")+
-  ylab("Temperature anomaly")
-ggsave("check_plot/time_t.png",plot=tpt,width = 8,height = 2)
-rqt <- ggplot(time_trends[[5]],aes(x=seq(1994,2016,2),y=X1))+geom_line()+geom_errorbar(aes(ymin=X2, ymax=X3)) +xlab("Years")+
-  ylab("Risk quotient anomaly")
-ggsave("check_plot/rq_t.png",plot=rqt,width = 8,height = 2)
 # FUNCTION ##############################################################
 # check for correlation between parameters
 # get combos of all variables
-pair <- combn(names(covars_id),2)
+pair <- combn(names(covars_id[1:6]),2)
 x = covars_id
 # calculate correlations      
 cors_mat  <- apply(pair,2,function(cname){ 
@@ -472,9 +490,9 @@ cors_mat  <- apply(pair,2,function(cname){
   
   list(cors,pcor)
 })
-cors_mat
 
-# 
+
+#  correlation plot + table of correlations
 lapply(cors_mat,function(x){
   cmx <-as.data.frame(x[[1]])
   colnames(cmx) <- c("Year","Cor","Var 1", "Var 2")
@@ -485,7 +503,7 @@ lapply(cors_mat,function(x){
          ,plot=plts,width = 8,height = 8)
 })
 
-# 
+# mean temporal trends
 
 time_trends <- lapply(covars_id,function(x1){
   cv.trend  <-  pivot_longer(x1,colnames(x1[-1])) %>% 
@@ -501,7 +519,33 @@ ggsave("check_plot/RQts.png",plot=time_trends$RQsum,width = 8,height = 2)
 ggsave("check_plot/AGts.png",plot=time_trends$agri,width = 8,height = 2)
 ggsave("check_plot/SEts.png",plot=time_trends$semi,width = 8,height = 2)
 
+##########################################################################
+# variable trends over time
+time_trends <- lapply(covars_id,function(x){
+  
+  # remove tile column
+  cx <- x[-1]
+  cx_out <- data.frame(matrix(ncol = 3,nrow = 12))
+  
+  # get mean and 95 credible intervals
+  cx_out[,1] <- apply(cx,2,mean)
+  cx_out[,2] <- apply(cx,2,quantile,probs = 0.025)
+  cx_out[,3] <- apply(cx,2,quantile,probs = 0.975)
+  cx_out
+})
 
+
+
+tpt <- ggplot(time_trends[[1]],aes(x=seq(1994,2016,2),y=X1))+geom_line()+geom_errorbar(aes(ymin=X2, ymax=X3)) +xlab("Years")+
+  ylab("Temperature anomaly")
+ggsave("check_plot/time_t.png",plot=tpt,width = 8,height = 2)
+rqt <- ggplot(time_trends[[5]],aes(x=seq(1994,2016,2),y=X1))+geom_line()+geom_errorbar(aes(ymin=X2, ymax=X3)) +xlab("Years")+
+  ylab("Risk quotient anomaly")
+ggsave("check_plot/rq_t.png",plot=rqt,width = 8,height = 2)
+
+
+
+}
 #########################################################################
 # order check
 if(!all(rownames(zobs[1,,])==site_id$site_name)) { cat("check sites are in the correct order")}
@@ -525,6 +569,7 @@ region.cov <- left_join(data.frame(site_5km=rownames(zobs[1,,])),region)
 
 # order check
 if(!all(rownames(zobs[1,,])==region.cov$site_5km)) { cat("check sites are in the correct order")}
+
 #########################################################################
 # Julian date
 visit$jstan <- visit$Jul_date-mean(visit$Jul_date)
@@ -539,3 +584,4 @@ cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,
 
 
 saveRDS(list(occup,visit,zobs,covars,closure.period,region=region.cov),file.name)
+out <- list(occup,visit,zobs,covars,closure.period,region=region.cov)

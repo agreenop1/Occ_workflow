@@ -4,22 +4,17 @@
 library(brms)
 library(BRCmap)
 library(ggmcmc)
-library(tidyverse)
 library(ggplot2)
 library(dplyr)
 library(forcats)
 source("output_functions.R")
 source("Occ_workflow_V2/outputs_3/combine_chain_4.2.R")
 UK <-  readRDS("UK_map.rds")
-# read in parameters
-para <- c("mu.beta","gamma","beta","init.occ","mu.alpha.phi","mu.gamma","alpha.phi",
-          "dtype1.p","dtype2.p","dtype3.p","alpha.p")
-
 
 # read in data with cover it information
 data="hoverflies"
 
-tribe= "Syrphini"
+tribe= "Bacchini"
 group = 'hoverflies_pol'
 mod =paste0( "all_",tribe)
 cat(mod,group,"\n")
@@ -65,6 +60,74 @@ occ_output <- readRDS(paste0("jas_out/all_",tribe,"_hoverflies_pol_summary.rds")
 out <- occ_output
 
 cat((nrow(out$sims.list$alpha.phi)*5)/3,"iterations used before thin per chain","\n")
+
+################################################################################
+########################### Diagnostic Plots ###################################
+################################################################################
+
+# model 
+species <- colnames(occ)
+nspecies <- length(species)
+out <- occ_output
+
+# names of covariates
+covs <- c("Temperature spatial","Temperature temporal",
+          "Semi Natural Landcover","Agricultural Landcover"
+          ,"Risk Quotient temporal","Risk Quotient spatial"
+)
+
+n.cov <- length(covs)
+
+# parameters to check
+parameters=c("mu.beta","dtype1.p","beta","gamma")
+
+# output <- summary_chains(out,comb.chain = T,keep.samples = F)
+options(max.print=10000);print(out)
+
+samples = out$samples
+occ.sum <- data.frame(round(out$summary,3))
+con.f <- occ.sum[occ.sum$Rhat>1.05,] # check parameter convergence
+rhat. <- out$Rhat # all rhat
+
+samp.df <- ggmcmc::ggs(samples) # all samples
+
+# par.p plots all parameters above - mainly diagnostics -  should detect each type of parameter okay
+# parameters need to be a vector of names
+par.p <-sapply(parameters,output_plots,samp.df = samp.df,rhat=rhat,species_names = species,simple = F)
+par.p
+
+
+# save plots
+wid = 6
+hei = 3
+
+par.p$mu.beta
+
+# plots of chains, density and parameter estimate 
+
+m.beta <- ggpubr::ggarrange(plotlist = par.p$mu.beta.mu.beta,nrow=1,ncol=2)
+ggsave(paste0("effect_plot/Main Effects.1",'_',file,".png"),m.beta[[1]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.2",'_',file,".png"),m.beta[[2]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.3",'_',file,".png"),m.beta[[3]],width = wid,height = hei)
+m.beta
+
+# individual species plots 
+ind_plots <- list()
+
+for(i in 1:n.cov){
+  ind_plots[[i]] <-  plot_effects(covs[[i]],species=species,cov=i)
+  ggsave(paste0( "effect_plot/",covs[[i]],'_',file,".png"),ind_plots[[i]],width = wid,height = hei)
+}
+
+ind_plots
+
+# check correlation between parameter estimates
+cor_plot <- ggs_pairs(samp.df,family="mu.beta" ,lower = list(continuous = "density",alpha=0.2))
+ggsave('check_plot/mu_cor_plots.png',cor_plot,width=12,height=9)
+
+rm(out)
+#load("jas_out/3_bee_C.3_ID_9.rdata")
+#save(out,file="jas_out/3_bee_all_C.3_run.rdata")
 
 #################################################################
 ############# PP Checks #########################################
@@ -188,73 +251,6 @@ ggplot() + geom_density(data=occres1,aes(x=sr_diff,group=as.factor(rep)))
 ggplot() + geom_histogram(data=occres1,aes(x=sr_diff))
 quantile(occres1$sr_diff,0.20)
 
-################################################################################
-########################### Diagnostic Plots ###################################
-################################################################################
-
-# model 
-species <- colnames(occ)
-nspecies <- length(species)
-out <- occ_output
-
-# names of covariates
-covs <- c("Temperature spatial","Temperature temporal",
-          "Semi Natural Landcover","Agricultural Landcover"
-          ,"Risk Quotient temporal","Risk Quotient spatial"
-)
-
-n.cov <- length(covs)
-
-# parameters to check
-parameters=c("mu.beta","d.type1.p","d.type2.p","d.type3.p")
-parameters=c("mu.beta")
-# output <- summary_chains(out,comb.chain = T,keep.samples = F)
-options(max.print=10000);print(out)
-
-samples = out$samples
-occ.sum <- data.frame(round(out$summary,3))
-con.f <- occ.sum[occ.sum$Rhat>1.05,] # check parameter convergence
-rhat. <- out$Rhat # all rhat
-
-samp.df <- ggmcmc::ggs(samples) # all samples
-
-# par.p plots all parameters above - mainly diagnostics -  should detect each type of parameter okay
-# parameters need to be a vector of names
-par.p <-sapply(parameters,output_plots,USE.NAMES=T,simple=F)
-par.p
-
-
-# save plots
-wid = 6
-hei = 3
-
-par.p$mu.beta
-
-# plots of chains, density and parameter estimate 
-
-m.beta <- ggpubr::ggarrange(plotlist = par.p$mu.beta.mu.beta,nrow=1,ncol=2)
-ggsave(paste0("effect_plot/Main Effects.1",'_',file,".png"),m.beta[[1]],width = wid,height = hei)
-ggsave(paste0("effect_plot/Main Effects.2",'_',file,".png"),m.beta[[2]],width = wid,height = hei)
-ggsave(paste0("effect_plot/Main Effects.3",'_',file,".png"),m.beta[[3]],width = wid,height = hei)
-m.beta
-
-# individual species plots 
-ind_plots <- list()
-
-for(i in 1:n.cov){
-  ind_plots[[i]] <-  plot_effects(covs[[i]],species=species,cov=i)
-  ggsave(paste0( "effect_plot/",covs[[i]],'_',file,".png"),ind_plots[[i]],width = wid,height = hei)
-}
-
-ind_plots
-
-# check correlation between parameter estimates
-cor_plot <- ggs_pairs(samp.df,family="mu.beta" ,lower = list(continuous = "density",alpha=0.2))
-ggsave('check_plot/mu_cor_plots.png',cor_plot,width=12,height=9)
-
-rm(out)
-load("jas_out/3_bee_C.3_ID_9.rdata")
-save(out,file="jas_out/3_bee_all_C.3_run.rdata")
 
 
 
