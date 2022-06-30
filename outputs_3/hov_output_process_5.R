@@ -7,6 +7,7 @@ library(ggmcmc)
 library(ggplot2)
 library(dplyr)
 library(forcats)
+library(caret)
 source("output_functions.R")
 source("Occ_workflow_V2/outputs_3/combine_chain_4.2.R")
 UK <-  readRDS("UK_map.rds")
@@ -14,7 +15,7 @@ UK <-  readRDS("UK_map.rds")
 # read in data with cover it information
 data="hoverflies"
 
-tribe= "Bacchini"
+tribe= "Eristalini"
 rq = "pol"
 group = paste0('hoverflies_',rq)
 mod =paste0( "all_",tribe)
@@ -26,7 +27,7 @@ unique(hover$tribe)
 keep_names <- hover$species[hover$tribe==tribe]
 
 # species in order they are in occ dataframe!
-jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016",rq,".rds"))
+jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016","pol",".rds"))
 
 
 occ <- jas_data[[1]][-1]
@@ -108,10 +109,10 @@ hei = 3
 
 # plots of chains, density and parameter estimate 
 
-m.beta <- ggpubr::ggarrange(plotlist = par.p$mu.beta.mu.beta,nrow=1,ncol=2)
-ggsave(paste0("effect_plot/Main Effects.1",'_',file,".png"),m.beta[[1]],width = wid,height = hei)
-ggsave(paste0("effect_plot/Main Effects.2",'_',file,".png"),m.beta[[2]],width = wid,height = hei)
-ggsave(paste0("effect_plot/Main Effects.3",'_',file,".png"),m.beta[[3]],width = wid,height = hei)
+m.beta <- ggpubr::ggarrange(plotlist = par.p$mu.beta,nrow=2,ncol=1)
+ggsave(paste0("effect_plot/Main Effects.1",'_',tribe,group,".png"),m.beta[[1]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.2",'_',tribe,group,".png"),m.beta[[2]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.3",'_',tribe,group,".png"),m.beta[[3]],width = wid,height = hei)
 m.beta
 
 # individual species plots 
@@ -229,11 +230,14 @@ sr_site <- cbind(total=rowSums( check[3:nspecies]),check[c("site_5km","TP")]) # 
 # summarise predicted occupancies status
 pop1 <- popbin[1,,,1] # get occupancy status
 zi <- z[,,1] # observed occupancies
+z_i <- z
+z_i[is.na(z_i)] <- 0
+popbin_i <- popbin
 zi[is.na(zi)] <- 0 # set any na to zero
 pop1[zi==0] <- 0 # make sure we only include observations where the species has been observed
 
 occres1 <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=1,tp=1)
-
+sensitivity <- c()
 # repeat for reps 
 for(i in 1:nrep){
   for(t in 1:time){
@@ -246,17 +250,21 @@ for(i in 1:nrep){
    occres1 <- rbind(occres1,occres)
    
   }
+  
+  popbin_i[i,,,][z_i==0] <- 0 
+  sensitivity[i]  <- confusionMatrix(as.factor(c(  popbin_i[i,,,])),as.factor(c(z_i)),positive="1")$byClass[[1]]
 }
 
 # plots of model predictive ability
-ggplot() + geom_density(data=occres1,aes(x=log(sr),group=as.factor(rep)))+geom_density(aes(x=log(sr_site$total)),color="blue")
-ggplot() + geom_density(data=occres1,aes(x=sr_diff,group=as.factor(rep)))
-ggplot() + geom_histogram(data=occres1,aes(x=sr_diff))
+ggplot() + geom_density(data=occres1,aes(x=log(sr),group=as.factor(rep)), adjust=2.5)+
+  geom_density(aes(x=log(sr_site$total)),color="blue", adjust=2.5)
+
+ggplot() + geom_histogram(data=sr_site,aes(x=log(total)))
 quantile(occres1$sr_diff,0.20)
 
-
-
-
+mean(sensitivity)
+quantile(sensitivity,0.025)
+quantile(sensitivity,0.975)
 ###############################################################
 ##################### Run simulations #########################
 ###############################################################
