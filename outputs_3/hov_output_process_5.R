@@ -238,6 +238,7 @@ pop1[zi==0] <- 0 # make sure we only include observations where the species has 
 
 occres1 <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=1,tp=1)
 sensitivity <- c()
+roc. <- list()
 # repeat for reps 
 for(i in 1:nrep){
   for(t in 1:time){
@@ -253,6 +254,8 @@ for(i in 1:nrep){
   
   popbin_i[i,,,][z_i==0] <- 0 
   sensitivity[i]  <- confusionMatrix(as.factor(c(  popbin_i[i,,,])),as.factor(c(z_i)),positive="1")$byClass[[1]]
+  roc. <-   roc(c(z_i),c(psi[i,,,]),direction="<")
+
 }
 
 # plots of model predictive ability
