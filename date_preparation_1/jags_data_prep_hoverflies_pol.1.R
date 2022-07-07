@@ -349,6 +349,108 @@ for(i in 1:12){
 
 out
 }
+#########################################################################
+#################### Risk of Bias Assessment ############################
+#########################################################################
+# recording efforts
+sxc <- distinct( visit[c("TP","site_5km")])
+n.svisits <-  as.data.frame( table(sxc$site_5km)) # number of time period sites visited in
+colnames(n.svisits)[1] <- "site_5km"
+
+# region observation 
+region <-distinct( read.csv("osr_pesticide_5km_1994_2010_v3.csv")[c("ref_5km","region")]) 
+region$region <- tolower(region$region)
+region <-distinct(region) 
+colnames(region)[1] <- "site_5km"
+
+n.svisits.r <- left_join(n.svisits,region)
+visits_reg <- left_join(visit,region)
+
+# frequency of observations at the uk and regional scale
+uk_freq <- do.call(rbind, lapply(2:13,function(x) data.frame(percent=(sum(n.svisits.r$Freq==x )/sum(n.svisits.r$Freq>0 ))*100,TP_visited=x)))
+
+region_freq <- do.call(rbind, lapply(2:13,function(x){
+  region_freq <- n.svisits.r %>% group_by(region) %>% summarise(percent=(sum(Freq==x)/sum(Freq>0)*100))
+  region_freq$TP_visited <- x
+  region_freq$region <- as.factor(region_freq$region )
+  region_freq
+}))
+
+# plots of sampling frequency at different scales
+# uk
+uk_plot_f <- ggplot()+ geom_line(data=uk_freq,aes(y=percent,x=TP_visited))+
+  geom_point(data=uk_freq,aes(y=percent,x=TP_visited))
+
+# regional
+region_plot_f <- ggplot()+ geom_line(data=region_freq,aes(y=percent,x=TP_visited,colour=region))+
+  geom_point(data=region_freq,aes(y=percent,x=TP_visited,colour=region))
+
+# number of observations at different scales
+region_v <- as.data.frame(table(visits_reg$region,visits_reg$TP))
+site_v <- as.data.frame(table(visits_reg$site_5km))
+site_f <- distinct(visit[c("site_5km","TP")])
+site_f <- as.data.frame(table(site_f$site_5km))
+
+# set column names
+colnames(region_v) <- c("region","Closure","Number_of_visits")
+colnames(site_v) <- c("gr","number_of_visits")
+colnames(site_f) <- c("gr","number_of_closure")
+
+# create different regional parameters
+region_v_c <- region_v %>% group_by(Closure) %>% summarise(total=sum(Number_of_visits))
+region_v <- left_join(region_v ,region_v_c )
+region_v$Closure <- as.numeric(region_v$Closure)
+
+# regional plots of the total number of visits
+region_plot_v <- ggplot()+ geom_line(data=region_v,aes(y=Number_of_visits ,x=Closure,colour=region))+
+  geom_point(data=region_v,aes(y=Number_of_visits ,x=Closure,colour=region))
+
+region_plot_v_stacked <-   ggplot( ) + 
+  geom_bar(data=region_v,aes( y=Number_of_visits, x=Closure,fill=region),position="stack", stat="identity")
+
+# map of total visits per site
+coord <- distinct(read.csv("agcensus.csv",header=T)[2:4]) # read in coordinates for plots 
+site_v  <- left_join(site_v,coord) 
+site_f  <- left_join(site_f,coord) 
+
+# total number of visits by 5km cell
+ggplot() +
+  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+  ylim(0, 700000)  + geom_tile(data = site_v , 
+                               aes(x = E, y = N, fill =number_of_visits))+
+  scale_fill_continuous(type = "viridis", name = 'Total visits')+ theme(panel.grid.major = element_blank(), 
+                                                                        panel.grid.minor = element_blank(),
+                                                                        panel.background = element_blank())
+# total number of closure periods Visited in by 5km cell
+ggplot() +
+  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+  ylim(0, 700000)  + geom_tile(data = site_f , 
+                               aes(x = E, y = N, fill =number_of_closure))+
+  scale_fill_continuous(type = "viridis", name = 'Total number of closure periods \n visited in')+ 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+# look at sampling across species 
+occ.dat1 <- occ.dat[occ.dat$CONCEPT %in% colnames(occup[-1]),]
+occ.dat1 <- left_join(occ.dat1,region)
+sp_re_closure <- distinct( occ.dat1[c("CONCEPT","region","closure_per")])
+sp_closure <- distinct( occ.dat1[c("CONCEPT","closure_per")])
+n_sp_cl <- as.data.frame( table(sp_closure$closure_per))
+n_spre_cl <- as.data.frame( table(sp_re_closure$region,sp_re_closure$closure_per))
+
+# name columns
+colnames(n_sp_cl) <- c("Closure","n_sp_observed")
+n_sp_cl$Closure <- as.numeric(n_sp_cl$Closure)
+colnames(n_spre_cl) <- c("region","Closure","n_sp_observed")
+n_spre_cl$Closure <- as.numeric(n_spre_cl$Closure)
+
+ggplot()+ geom_line(data=n_sp_cl,aes(y=n_sp_observed,x=Closure))+
+  geom_point(data=n_sp_cl,aes(y=n_sp_observed,x=Closure))
+
+ggplot()+ geom_line(data=n_spre_cl,aes(y=n_sp_observed,x=Closure,color=region))+
+  geom_point(data=n_spre_cl,aes(y=n_sp_observed,x=Closure,color=region))
+
 ########################################################################
 # covariates with explicit site ID need for checks
 var.names = names(cov_assess)
