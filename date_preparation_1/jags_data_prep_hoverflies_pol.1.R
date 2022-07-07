@@ -299,6 +299,8 @@ visit$SHORT[between(visit$L,2,3)] <- 1
 visit$LONG <- 0
 visit$LONG[visit$L>3] <- 1
 
+visit$Year <- as.numeric(str_sub(visit$visit,start=7,end = 10 ))-1993
+nYear <- length(unique(visit$Year))
 #########################################################################
 # make sure occupancy and visit data match
 if(all(occup$visit==visit$visit)){"Occupancy and visit data match"}
@@ -583,5 +585,5 @@ cat(ncol(occup[-1]),"species","\n")
 cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"pol",".rds"),"\n")
 
 
-saveRDS(list(occup,visit,zobs,covars,closure.period,region=region.cov),file.name)
-out <- list(occup,visit,zobs,covars,closure.period,region=region.cov)
+saveRDS(list(occup,visit,zobs,covars,closure.period,nYear=nYear),file.name)
+out <- list(occup,visit,zobs,covars,closure.period,nYear=nYear)

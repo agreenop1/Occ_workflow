@@ -6,6 +6,7 @@
 library(sparta)
 library(dplyr)
 library(BRCmap)
+library(stringr)
 source("brcmap_f.R")
 library(dplyr)
 library(reshape2)
@@ -14,6 +15,7 @@ library(ggplot2)
 library(ggpubr)
 years_n <- seq(1994,2016,2)
 UK <-  readRDS("UK_map.rds")
+plots <- F
 # closure period 1 = yearly and 2 = biennial 
 # Lag determines whether the covariates for t (lag = T) or t-1 are used to predict persistence
 
@@ -284,6 +286,9 @@ visit$SHORT[between(visit$L,2,3)] <- 1
 visit$LONG <- 0
 visit$LONG[visit$L>3] <- 1
 
+
+visit$Year <- as.numeric(str_sub(visit$visit,start=7,end = 10 ))-1993
+nYear <- length(unique(visit$Year))
 #########################################################################
 # make sure occupancy and visit data match
 if(all(occup$visit==visit$visit)){"Occupancy and visit data match"}
@@ -328,181 +333,281 @@ for (i in 1:length(var.names)){
   names(covars)[i] <- var.names[[i]]
 }
 #########################################################################
-# plots 
-coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
-
-id_plots <- lapply(covars_id,function(x){left_join(x,coord)})
-
-env_plots <- lapply (1:6,function(x1){
+if(plots){
+  # species plots
+  coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
+  hover <- read.csv("hoverfly_names.csv")
   
-            x1 <- id_plots[[x1]]
-            out <- list()
-            
-            for(i in 1:12){
-              
-            sy <- x1[c("E","N",years_n[[i]])]
-            
-         
-            colnames(sy)[1:3] <- c("E","N","Year")
-            
-            out[[i]] <- ggplot() +
-              geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(90000, 660000) +ylim(0,660000)+
-           geom_tile(data = sy, 
-                                           aes(x = E, y = N, fill =Year))+
-              scale_fill_continuous(type = "viridis", name = years_n[[i]]) +
-              theme(
-                axis.line=element_blank(),axis.text.x=element_blank(),
-                        axis.text.y=element_blank(),axis.ticks=element_blank(),
-                        axis.title.x=element_blank(),
-                legend.title=element_blank(),
-                        axis.title.y=element_blank(),
-                        panel.background=element_blank(),panel.border=element_blank(),panel.grid.major=element_blank(),
-                        panel.grid.minor=element_blank(),plot.background=element_blank())
-            }
-            
-            out
-})
-
-names(env_plots) <- names(id_plots)
-agri=env_plots$agri[[1]]+ggtitle("Percentage agricultural landcover")
-
-
-rq=env_plots$RQsum_M[[1]]+ggtitle("Mean risk quotient at a site")
-
-rq
-ep1 <- env_plots[[1]][[4]]
-ggsave("pmap.png",plot=p1, dpi=1080, dev='png',   height=4.5, width=4.5, units="in") 
-ggsave("agri.png",plot=agri, dpi=2000, dev='png',   height=4.5,width=4.5, units="in")             
-ggsave("rq.png",plot=rq, dpi=2000, dev='png',   height=4.5,width=4.5, units="in")
-# FUNCTION ##############################################################
-#  Check for temporal correlation in parameters at sites through years
-pair <- combn( names(id_plots),2)
-
-n_sites  <- nrow(x1)  
-cor_out <- data.frame(matrix(nrow=n_sites,ncol=ncol(pair)))
-
-for(j in 1:ncol(pair)){
-
-cname <- pair[,j]
-colnames(cor_out)[j] <- paste(cname[1],"vs",cname[2])
-
-  x1 = id_plots[[cname[1]]];y1 = id_plots[[cname[2]]]
-  x1 = x1[paste0(years_n)]; y1 = y1[paste0(years_n)]
-
- 
+  keep_names <- hover$species[hover$tribe%in%unique(hover$tribe)] # Bacchini Eristalini
+  
+  occ_record <- cbind(occ_tot=rowSums( occup[keep_names]),visit)
+  occ_map <- occ_record %>% group_by(TP,site_5km) %>% summarise(occ_sum=occ_tot)
+  colnames(occ_map)[2] <- 'gr'
+  
+  occ_map <- left_join(occ_map,coord)
   
   
-  for(i in 1:n_sites){
-  cor_out[i,j] <-  cor(t(x1[i,]),t(y1[i,]))
-  }  
-}
-
-# correlation plots - temporal
-rt <- ggplot(cor_out,aes(x=`temp_anom vs RQsum_A`)) + geom_histogram()+
-  xlab("Temperature anomaly vs RQ anomaly (r)")
-
-ar <- ggplot(cor_out,aes(x=`agri vs RQsum_A`)) + geom_histogram()+
-  xlab("Agriculture vs RQ anomaly (r)")
-
-ta <- ggplot(cor_out,aes(x=`temp_anom vs agri`)) + geom_histogram()+
-  xlab("Agriculture vs Temperature anomaly (r)")
-
-st <- ggplot(cor_out,aes(x=`temp_anom vs semi`)) + geom_histogram()+
-  xlab("Semi-natural vs Temperature anomaly (r)")
-
-sr <- ggplot(cor_out,aes(x=`semi vs RQsum_A`)) + geom_histogram()+
-  xlab("Semi-natural vs RQ anomaly (r)")
-
-sa <- ggplot(cor_out,aes(x=`semi vs agri`)) + geom_histogram()+
-  xlab("Semi-natural vs Agriculture (r)")
-
-temr_plots <- ggarrange(plotlist=list(rt,ar,ta,st,sr,sa),nrow=3,ncol=2)
-
-ggsave("check_plot/temporal_plot.png",temr_plots, width = 7,height=8)
-
-##########################################################################
-# variable trends over time
-time_trends <- lapply(covars_id,function(x){
-                      
-                      # remove tile column
-                      cx <- x[-1]
-                      cx_out <- data.frame(matrix(ncol = 3,nrow = 12))
-                      
-                      # get mean and 95 credible intervals
-                      cx_out[,1] <- apply(cx,2,mean)
-                      cx_out[,2] <- apply(cx,2,quantile,probs = 0.025)
-                      cx_out[,3] <- apply(cx,2,quantile,probs = 0.975)
-                      cx_out
-                      })
-
-
-
-tpt <- ggplot(time_trends[[1]],aes(x=seq(1994,2016,2),y=X1))+geom_line()+geom_errorbar(aes(ymin=X2, ymax=X3)) +xlab("Years")+
-        ylab("Temperature anomaly")
-ggsave("check_plot/time_t.png",plot=tpt,width = 8,height = 2)
-rqt <- ggplot(time_trends[[5]],aes(x=seq(1994,2016,2),y=X1))+geom_line()+geom_errorbar(aes(ymin=X2, ymax=X3)) +xlab("Years")+
-  ylab("Risk quotient anomaly")
-ggsave("check_plot/rq_t.png",plot=rqt,width = 8,height = 2)
-# FUNCTION ##############################################################
-# check for correlation between parameters
-# get combos of all variables
-pair <- combn(names(covars_id),2)
-x = covars_id
-# calculate correlations      
-cors_mat  <- apply(pair,2,function(cname){ 
-  x1 = x[[cname[1]]];y1 = x[[cname[2]]]
+  out <- list()
   
-  x2  <- pivot_longer(x1,colnames(x1[-1]))
-  y2  <- pivot_longer(y1,colnames(y1[-1]))
-  colnames(y2)[3] <- "value1"
-  cors <-  matrix(ncol =4,nrow=ncol(x1[-1]))
-  c3 <- left_join(x2,y2)
-  pcor <-  ggplot(data=c3)+geom_point(aes(x=value,y=value1,color=as.numeric(name)))+ 
-    xlab(cname[[1]]) + ylab(cname[[2]])
-  pcor$labels$colour <- "Year"
-  pcor
-  
-  for( i in 1:ncol(x1[-1])){
+  for(i in 1:12){
     
-    cors[i,1] <- i
-    cors[i,2]<-  round(cor(x1[i+1],y1[i+1]),2)
-    cors[i,3] <-cname[1]
-    cors[i,4] <-cname[2]
+    sy <- occ_map[occ_map$TP==i,]
+    
+    sy <- sy[sy$occ_sum>0,]
+    
+    
+    out[[i]] <- ggplot() +
+      geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+      ylim(0, 700000)  + geom_tile(data = sy, 
+                                   aes(x = E, y = N, fill =occ_sum))+
+      scale_fill_continuous(type = "viridis", name = years_n[[i]])+ theme(panel.grid.major = element_blank(), 
+                                                                          panel.grid.minor = element_blank(),
+                                                                          panel.background = element_blank())
   }
   
+  out
+}
+########################################################################
+# covariates with explicit site ID need for checks
+var.names = names(cov_assess)
+covars_id <- list()
+
+for (i in 1:length(var.names)){
+  covars_id[[i]] <- var_prep(cov_assess[[i]],var.x=var.x[[i]],var.names=var.names[[i]], site="gr", keep.id=T,center=F)
+  names(covars_id)[i] <- var.names[[i]]
+}
+
+
+# covariates used in simulations
+z1 <- var_prep(zero_app,var.x="rqpol", site="gr", keep.id=T,center=F) # zero application wide format
+z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pol", site="gr", keep.id=T,center=F) # actual application rq temporal
+saveRDS(list(zero_application=z1,actual=z0),"zero_app_hovpol.rds") 
+write.csv(covars_id$temp_anom,"site_id.csv")
+saveRDS(covars_id,"covars_wide_hovpol.rds")
+
+# double check all covs are in the right order
+for (i in 1:length(covars_id)){
+  if(!all(covars_id[[i]]$gr==site_id$site_name)){stop("covs are not in the right order")}
+}
+
+# covariates without site id
+covars <- list()
+
+for (i in 1:length(var.names)){
+  covars[[i]] <- var_prep(cov_assess[[i]],var.x=var.x[[i]],var.names=var.names[[i]], site="gr", keep.id=F,center=scale_bin[[i]])
+  names(covars)[i] <- var.names[[i]]
+}
+#########################################################################
+# Risk of Bias Assessment
+# recording efforts
+sxc <- distinct( visit[c("TP","site_5km")])
+n.svisits <-  as.data.frame( table(sxc$site_5km)) # number of time period sites visited in
+colnames(n.svisits)[1] <- "site_5km"
+
+# region observation 
+region <-distinct( read.csv("osr_pesticide_5km_1994_2010_v3.csv")[c("ref_5km","region")]) 
+region$region <- tolower(region$region)
+region <-distinct(region) 
+colnames(region)[1] <- "site_5km"
+
+n.svisits.r <- left_join(n.svisits,region)
+visits_reg <- left_join(visit,region)
+# frequency of observations at the uk and regional scale
+uk_freq <- do.call(rbind, lapply(2:13,function(x) data.frame(percent=(sum(n.svisits.r$Freq==x )/sum(n.svisits.r$Freq>0 ))*100,TP_visited=x)))
+
+region_freq <- do.call(rbind, lapply(2:13,function(x){
+                                      region_freq <- n.svisits.r %>% group_by(region) %>% summarise(percent=(sum(Freq==x)/sum(Freq>0)*100))
+                                      region_freq$TP_visited <- x
+                                      region_freq$region <- as.factor(region_freq$region )
+                                      region_freq
+                                      }))
+                        
+# plots of sampling frequency at different scales
+uk_plot_f <- ggplot()+ geom_line(data=uk_freq,aes(y=percent,x=TP_visited))+
+          geom_point(data=uk_freq,aes(y=percent,x=TP_visited))
+
+region_plot_f <- ggplot()+ geom_line(data=region_freq,aes(y=percent,x=TP_visited,colour=region))+
+        geom_point(data=region_freq,aes(y=percent,x=TP_visited,colour=region))
+
+# number of observations at different scales
+region_v <- as.data.frame(table(visits_reg$region,visits_reg$TP))
+colnames(region_v) <- c("region","Closure","Number_of_visits")
+region_v$Closure <- as.numeric(region_v$Closure)
+
+region_plot_v <- ggplot()+ geom_line(data=region_v,aes(y=Number_of_visits ,x=Closure,colour=region))+
+  geom_point(data=region_v,aes(y=Number_of_visits ,x=Closure,colour=region))
+
+#########################################################################
+
+
+if(plots){
+  # plots 
+  coord <- distinct(read.csv("agcensus.csv",header=T)[2:4]) # read in coordinates for plots 
   
-  list(cors,pcor)
-})
-cors_mat
-
-# 
-lapply(cors_mat,function(x){
-  cmx <-as.data.frame(x[[1]])
-  colnames(cmx) <- c("Year","Cor","Var 1", "Var 2")
-  cmx$Year <- cov_year
-  plt <- x[[2]]
-  plts <- ggarrange(plt,ggtexttable(as.data.frame(cmx)),nrow=2)
-  ggsave(paste0("check_plot/",cmx[1,3],"_",cmx[1,4],".png")
-         ,plot=plts,width = 8,height = 8)
-})
-
-# 
+  id_plots <- lapply(covars_id[1:6],function(x){left_join(x,coord)}) # join covariates with coordinates
   
-time_trends <- lapply(covars_id,function(x1){
-  cv.trend  <-  pivot_longer(x1,colnames(x1[-1])) %>% 
-    group_by(name) %>% 
-    summarise(M=mean(value),SD=sd(value))
+  # time x space plots for all covariates
+  env_plots <- lapply (1:6,function(x1){
+    
+    x1 <- id_plots[[x1]]
+    out <- list()
+    
+    for(i in 1:12){
+      
+      sy <- x1[c("E","N",years_n[[i]])]
+      
+      sy <- sy[sample(1:2000,500),]
+      colnames(sy)[1:3] <- c("E","N","Year")
+      
+      out[[i]] <- ggplot() +
+        geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+        ylim(0, 700000)  + geom_tile(data = sy, 
+                                     aes(x = E, y = N, fill =Year))+
+        scale_fill_continuous(type = "viridis", name = years_n[[i]])+ theme(panel.grid.major = element_blank(), 
+                                                                            panel.grid.minor = element_blank(),
+                                                                            panel.background = element_blank())
+    }
+    
+    out
+  })
   
-  ggplot(data=cv.trend)+
-    geom_line(aes(x=name,y=M,group=1))+
-    geom_point(aes(x=name,y=M,group=1))+
-    geom_errorbar(aes(x=name,ymin=M-SD,ymax=M+SD))})
-
-ggsave("check_plot/RQts.png",plot=time_trends$RQsum,width = 8,height = 2)
-ggsave("check_plot/AGts.png",plot=time_trends$agri,width = 8,height = 2)
-ggsave("check_plot/SEts.png",plot=time_trends$semi,width = 8,height = 2)
-
-
+  names(env_plots) <- names(id_plots)
+  
+  p1 <- env_plots
+  ggsave("pmap.png",plot=p1, dpi=600, dev='tiff',   height=4.5, width=4.5, units="in") 
+  
+  # FUNCTION ##############################################################
+  #  Check for temporal correlation in parameters at sites through years
+  pair <- combn( names(id_plots),2)
+  
+  n_sites  <- nrow(site_id)  
+  cor_out <- data.frame(matrix(nrow=n_sites,ncol=ncol(pair)))
+  
+  for(j in 1:ncol(pair)){
+    
+    cname <- pair[,j]
+    colnames(cor_out)[j] <- paste(cname[1],"vs",cname[2])
+    
+    x1 = id_plots[[cname[1]]];y1 = id_plots[[cname[2]]]
+    x1 = x1[paste0(years_n)]; y1 = y1[paste0(years_n)]
+    
+    
+    
+    
+    for(i in 1:n_sites){
+      cor_out[i,j] <-  cor(t(x1[i,]),t(y1[i,]))
+    }  
+  }
+  
+  # correlation plots - temporal
+  rt <- ggplot(cor_out,aes(x=`temp_anom vs RQsum_A`)) + geom_histogram()+
+    xlab("Temperature anomaly vs RQ anomaly (r)")
+  
+  ar <- ggplot(cor_out,aes(x=`agri vs RQsum_A`)) + geom_histogram()+
+    xlab("Agriculture vs RQ anomaly (r)")
+  
+  ta <- ggplot(cor_out,aes(x=`temp_anom vs agri`)) + geom_histogram()+
+    xlab("Agriculture vs Temperature anomaly (r)")
+  
+  st <- ggplot(cor_out,aes(x=`temp_anom vs semi`)) + geom_histogram()+
+    xlab("Semi-natural vs Temperature anomaly (r)")
+  
+  sr <- ggplot(cor_out,aes(x=`semi vs RQsum_A`)) + geom_histogram()+
+    xlab("Semi-natural vs RQ anomaly (r)")
+  
+  sa <- ggplot(cor_out,aes(x=`semi vs agri`)) + geom_histogram()+
+    xlab("Semi-natural vs Agriculture (r)")
+  
+  temr_plots <- ggarrange(plotlist=list(rt,ar,ta,st,sr,sa),nrow=3,ncol=2)
+  
+  ggsave("check_plot/temporal_plot.png",temr_plots, width = 7,height=8)
+  
+  # FUNCTION ##############################################################
+  # check for correlation between parameters
+  # get combos of all variables
+  pair <- combn(names(covars_id[1:6]),2)
+  x = covars_id
+  # calculate correlations      
+  cors_mat  <- apply(pair,2,function(cname){ 
+    x1 = x[[cname[1]]];y1 = x[[cname[2]]]
+    
+    x2  <- pivot_longer(x1,colnames(x1[-1]))
+    y2  <- pivot_longer(y1,colnames(y1[-1]))
+    colnames(y2)[3] <- "value1"
+    cors <-  matrix(ncol =4,nrow=ncol(x1[-1]))
+    c3 <- left_join(x2,y2)
+    pcor <-  ggplot(data=c3)+geom_point(aes(x=value,y=value1,color=as.numeric(name)))+ 
+      xlab(cname[[1]]) + ylab(cname[[2]])
+    pcor$labels$colour <- "Year"
+    pcor
+    
+    for( i in 1:ncol(x1[-1])){
+      
+      cors[i,1] <- i
+      cors[i,2]<-  round(cor(x1[i+1],y1[i+1]),2)
+      cors[i,3] <-cname[1]
+      cors[i,4] <-cname[2]
+    }
+    
+    
+    list(cors,pcor)
+  })
+  
+  
+  #  correlation plot + table of correlations
+  lapply(cors_mat,function(x){
+    cmx <-as.data.frame(x[[1]])
+    colnames(cmx) <- c("Year","Cor","Var 1", "Var 2")
+    cmx$Year <- cov_year
+    plt <- x[[2]]
+    plts <- ggarrange(plt,ggtexttable(as.data.frame(cmx)),nrow=2)
+    ggsave(paste0("check_plot/",cmx[1,3],"_",cmx[1,4],".png")
+           ,plot=plts,width = 8,height = 8)
+  })
+  
+  # mean temporal trends
+  
+  time_trends <- lapply(covars_id,function(x1){
+    cv.trend  <-  pivot_longer(x1,colnames(x1[-1])) %>% 
+      group_by(name) %>% 
+      summarise(M=mean(value),SD=sd(value))
+    
+    ggplot(data=cv.trend)+
+      geom_line(aes(x=name,y=M,group=1))+
+      geom_point(aes(x=name,y=M,group=1))+
+      geom_errorbar(aes(x=name,ymin=M-SD,ymax=M+SD))})
+  
+  ggsave("check_plot/RQts.png",plot=time_trends$RQsum,width = 8,height = 2)
+  ggsave("check_plot/AGts.png",plot=time_trends$agri,width = 8,height = 2)
+  ggsave("check_plot/SEts.png",plot=time_trends$semi,width = 8,height = 2)
+  
+  ##########################################################################
+  # variable trends over time
+  time_trends <- lapply(covars_id,function(x){
+    
+    # remove tile column
+    cx <- x[-1]
+    cx_out <- data.frame(matrix(ncol = 3,nrow = 12))
+    
+    # get mean and 95 credible intervals
+    cx_out[,1] <- apply(cx,2,mean)
+    cx_out[,2] <- apply(cx,2,quantile,probs = 0.025)
+    cx_out[,3] <- apply(cx,2,quantile,probs = 0.975)
+    cx_out
+  })
+  
+  
+  
+  tpt <- ggplot(time_trends[[1]],aes(x=seq(1994,2016,2),y=X1))+geom_line()+geom_errorbar(aes(ymin=X2, ymax=X3)) +xlab("Years")+
+    ylab("Temperature anomaly")
+  ggsave("check_plot/time_t.png",plot=tpt,width = 8,height = 2)
+  rqt <- ggplot(time_trends[[5]],aes(x=seq(1994,2016,2),y=X1))+geom_line()+geom_errorbar(aes(ymin=X2, ymax=X3)) +xlab("Years")+
+    ylab("Risk quotient anomaly")
+  ggsave("check_plot/rq_t.png",plot=rqt,width = 8,height = 2)
+  
+  
+  
+}
 #########################################################################
 # order check
 if(!all(rownames(zobs[1,,])==site_id$site_name)) { cat("check sites are in the correct order")}
@@ -514,6 +619,21 @@ for (i in 1:length(covars_id)){
 if(!all(dimnames(zobs)[[1]]==colnames(occup[-1]))){cat("check species names are in the correct order")}
 
 #########################################################################
+# region observation 
+region <-distinct( read.csv("osr_pesticide_5km_1994_2010_v3.csv")[c("ref_5km","region")]) 
+region$region <- tolower(region$region)
+region <-distinct(region) 
+region$region.n <- as.numeric(as.factor(region$region))
+colnames(region)[1] <- "site_5km"
+visit <- left_join(visit,region[c("site_5km","region")])
+
+# region ecological
+region.cov <- left_join(data.frame(site_5km=rownames(zobs[1,,])),region)
+nregion <- length(unique(region.cov$region.n))
+# order check
+if(!all(rownames(zobs[1,,])==region.cov$site_5km)) { cat("check sites are in the correct order")}
+
+#########################################################################
 # save outputs
 cat("Minimum observations",obs.n,"\n")
 cat(nrow(site_id),"sites","\n")
@@ -522,53 +642,8 @@ cat(ncol(occup[-1]),"species","\n")
 cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,".rds"),"\n")
 
 
-saveRDS(list(occup,visit,zobs,covars,closure.period),file.name)
 
-#########################################################################
-#################### Spatial Autocorrelation ############################
-#########################################################################
-library(tidyverse)
-library(sf)
-library(ape)
-# easting northing
-gb_cord <- id_plots[[1]][c(14,15)]
-
-# latitude longitude
-gb_lat <- gb_cord %>%
-  st_as_sf(coords = c("E", "N"), crs = 27700) %>%
-  st_transform(4326) %>%
-  st_coordinates() %>%
-  as_tibble()
-
-
-# assess autocorrelation using morans i 
-cord <- cbind(gb_lat,gb_cord)
-
-x <- id_plots[[1]]
-
-# join coordinate systems
-x1 <- left_join(x,cord)
-
-# covariate years
-years_n <- seq(1994,2016,2)
-y1 <-paste0( years_n[[i]])
-
-# subset for a year
-year_dat <- x1[c(y1,"X","Y")]
-
-# create inverse distance matrix
-dist_mat <- 1/(as.matrix(dist(cbind(year_dat$X, year_dat$Y))))
-diag(dist_mat) <- 0
-
-Moran.I(year_dat$`1994`,dist_mat)
-
-
-
-
-
-
-
-
-
-
-
+saveRDS(list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion),file.name)
+jas_data <- list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion)
+jas_data$region
+jas_data$nregion

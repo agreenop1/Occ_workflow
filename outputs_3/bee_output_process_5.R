@@ -4,55 +4,117 @@
 library(brms)
 library(BRCmap)
 library(ggmcmc)
-library(tidyverse)
 library(ggplot2)
 library(dplyr)
 library(forcats)
+library(caret)
 source("output_functions.R")
 source("Occ_workflow_V2/outputs_3/combine_chain_4.2.R")
 UK <-  readRDS("UK_map.rds")
-# read in parameters
-para <- c("mu.beta","gamma","beta","init.occ","mu.alpha.phi","mu.gamma","alpha.phi",
-          "dtype1.p","dtype2.p","dtype3.p","alpha.p")
-
-# start of file name
-file="3_bee" 
-
+# sre = without year random effect; rre = sum to zero random effect
 # read in data with cover it information
 data="bees"
-
 
 # species in order they are in occ dataframe!
 jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016.rds"))
 
+
+
+# remove id column
+occ <- jas_data[[1]][-1]
+vis <- jas_data[[2]]
+occdat <- cbind(occ,vis) 
+
+
 # the number of sites and number of time periods
 time = 13
-sites = 2278
-species = ncol(jas_data[[1]][-1])
-
-# number of iterations in each file
-its <- c(500)
-
-# file path where the files are located
-file.path = paste0("jas_out/",file ,"_C.CID_ID_UID.rdata")
+sites = nrow(jas_data[[4]]$temp_anom)
+species = ncol(occ)
 
 # covariates
 covars = jas_data[[4]]
 base <- list(temp.m=covars$mean_temp,temp.a=covars$temp_anom,semi=covars$semi,agri=covars$agri,RQA=covars$RQsum_A,RQM=covars$RQsum_M)
 
 
-# compile the chains from the model
-#out <- comb_daisy(parameters=para,
-#                  iter.index=33:33,chain.index=1:3,summary=T,file.path=file.path,by.it=500,
-#                  it.used=its,
-#                  iterations=1000,verbose=T)
-#
-occ_output <- readRDS("jas_out/summary_ps.rds")
+# output from jags  
+occ_output <- readRDS(paste0("jas_out/summary_ps.rds"))#
+out <- occ_output
+
+cat((nrow(out$sims.list$alpha.phi)*5)/3,"iterations used before thin per chain","\n")
+
+################################################################################
+########################### Diagnostic Plots ###################################
+################################################################################
+
+# model 
+species <- colnames(occ)
+nspecies <- length(species)
 out <- occ_output[[2]]
 
+# names of covariates
+covs <- c("Temperature spatial","Temperature temporal",
+          "Semi Natural Landcover","Agricultural Landcover"
+          ,"Risk Quotient temporal","Risk Quotient spatial"
+)
+
+n.cov <- length(covs)
+
+# parameters to check
+parameters=c("alpha.phi","beta")
+
+
+# options(max.print=10000);print(out)
+
+samples = out$samples
+occ.sum <- data.frame(round(out$summary,3))
+con.f <- occ.sum[occ.sum$Rhat>1.05,] # check parameter convergence
+rhat <- out$Rhat # all rhat
+
+samp.df <- ggmcmc::ggs(samples) # all samples
+
+# par.p plots all parameters above - mainly diagnostics -  should detect each type of parameter okay
+# parameters need to be a vector of names
+par.p <- sapply(parameters,output_plots,samp.df = samp.df,rhat=rhat,species_names = species,simple = T,simplify = F)
+obs.p <- sapply(c("alpha.p","dtype3.p","dtype1.p","dtype2.p"),
+                        output_plots,
+                        samp.df =ggmcmc::ggs( occ_output[[3]]$samples) ,
+                        rhat= occ_output[[3]]$Rhat,species_names = species,simple =T)
+
+ggarrange(plotlist=par.p$beta$`Bombus pratorum`,nrow=4,ncol=1)
+names(par.p$mu.beta) <- covs
+
+ggarrange( plotlist=par.p$dtype1.p,ncol=2, nrow=2)
+# save plots
+wid = 6
+hei = 3
 
 
 
+# plots of chains, density and parameter estimate 
+
+m.beta <- ggpubr::ggarrange(plotlist = par.p$mu.beta,nrow=2,ncol=1)
+ggsave(paste0("effect_plot/Main Effects.1",'_',tribe,group,".png"),m.beta[[1]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.2",'_',tribe,group,".png"),m.beta[[2]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.3",'_',tribe,group,".png"),m.beta[[3]],width = wid,height = hei)
+m.beta
+
+# individual species plots 
+ind_plots <- list()
+
+for(i in 1:n.cov){
+  ind_plots[[i]] <-  plot_effects(covs[[i]],species=species,cov=i)
+  ggsave(paste0( "effect_plot/",covs[[i]],'_',file,".png"),ind_plots[[i]],width = wid,height = hei)
+}
+
+ind_plots
+
+# check correlation between parameter estimates
+cor_plot <- ggs_pairs(samp.df,family=c("alpha.p") ,lower = list(continuous = "density",alpha=0.2))
+ggsave('check_plot/mu_cor_plots.png',cor_plot,width=12,height=9)
+
+rm(out)
+#load("jas_out/3_bee_C.3_ID_9.rdata")
+#save(out,file="jas_out/3_bee_all_C.3_run.rdata")
 
 #################################################################
 ############# PP Checks #########################################
@@ -60,19 +122,14 @@ out <- occ_output[[2]]
 # State Model
 # aggregate observations where a species was observed at a site
 
-occ <- jas_data[[1]][-1]
-vis <- jas_data[[2]]
-occdat <- cbind(occ,vis) 
-species <- colnames(jas_data[[1]][-1])
-nspecies <- length(species)
-
 
 # simulation
 covs <- c(base) # covariate list
 
 
 #  multiple species check
-nrep <- 150 #dim(out$sims.list$beta)[1]
+nrep <- 50 #dim(out$sims.list$beta)[1]
+out <- occ_output[[2]]
 popocc <- array(dim=c(nrep,nspecies,sites,time)) # occupancy estimates
 beta <- out$sims.list$beta[1:nrep,,] # beta coefficient
 gamma <-  out$sims.list$gamma[1:nrep,] # colonization
@@ -91,9 +148,10 @@ psi <- sim.pop(psi.start = init,
 
 # predict occupancy state
 popbin <- apply(psi,c(2,3,4),function(x){rbinom(length(x),1,x)})
-rm(psi)
+
 # observed occupancy
 z <- jas_data[[3]]
+
 
 # observation model
 out <- occ_output[[3]]
@@ -113,53 +171,76 @@ closure <- observed$TP
 y <- array(dim=c(nobs,nspecies),0) # predicted observations
 p <- array(dim=c(nobs,nspecies)) # probability occupancy
 
+
 # aggregate all observations seen at a site
 yrep <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=0)
 y_sum <- cbind(y_sum=sum(yrep$obs_count),rep=0)
-
+srep <- cbind(obs_count= colSums(y),rep=0,snames=0)
 # observation model
 for(i in 1:nrep){
   for(o in 1:nobs){
- 
+    
     # observation probability  
-    p[o,] <- inv_logit_scaled( alpha.p[i,closure[o]] + d1[i,] + d2[i,]*SHORT[o] +
-      d3[i,]*LONG[o])
+    p[o,] <- inv_logit_scaled( alpha.p[i,closure[o]] + 
+                                 d1[i,] + 
+                                 d2[i,]*SHORT[o] +
+                                 d3[i,]*LONG[o])
     
     # predicted occupancy
-    y[o,] <- rbinom(94,1,popbin[i,,site[o],closure[o]]*p[o,])
+    y[o,] <- rbinom(species,1,popbin[i,,site[o],closure[o]]*p[o,])
     
   }
   colnames(y) <- colnames(occ) 
   yreps <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=i)
   y_sum_i <- cbind(y_sum=sum(yreps$obs_count),rep=i)
   yrep <- rbind(yrep,yreps)
-  y_sum <- rbind(y_sum,y_sum_i )  
+  y_sum <- rbind(y_sum,y_sum_i )
+  srep_i <- cbind(obs_count= colSums(y),rep=i,snames=names(colSums(y)))
+  srep <- rbind(srep,srep_i)
 }
 
 
 # look at predicted values vs. real values
 yrep <- yrep[yrep$rep!=0,]
 y_sum <- y_sum[-1,]
+srep <- as.data.frame(srep[as.data.frame(srep)$rep!=0,])
+srep$obs_count <- as.numeric(srep$obs_count )
+act <-colSums( occ)
 ggplot() + geom_density(data=yrep,aes(x=obs_count,group=as.factor(rep)),adjust=2.5)+
   geom_density(aes(x=rowSums(occ)),color="blue", adjust=2.5)
 
-ggplot() + geom_histogram(data=as.data.frame(y_sum),aes(x=y_sum),bins =40)+
-  geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")
+nm <- unique(srep$snames)
+names(nm) <- unique(srep$snames)
+splots <- lapply(nm,function(x){
+  
+  ggplot() + geom_histogram(data=srep[srep$snames==x,] ,aes(x=obs_count))+
+    geom_vline(aes(xintercept=act[names(act)==x]),color="blue")+ggtitle(paste(x))
+})
+
+indplots <-ggarrange(plotlist=splots,ncol=4,nrow=4)
+
+sum_p <- ggplot() + geom_histogram(data=as.data.frame(y_sum),aes(x=y_sum),bins =40)+
+  geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")+ggtitle('Total Count Estimates')
+
 
 # state model only
 # get where species were observed at a site
 check <- cbind(occ,vis[c("site_5km","TP")]) %>% group_by(site_5km,TP) %>% summarise_all(sum) # observed occupancy
-check[3:96][check[3:96]>0] <- 1
-sr_site <- cbind(total=rowSums( check[3:96]),check[c("site_5km","TP")]) # observed occupancy sr
+check[3:nspecies][check[3:species]>0] <- 1
+sr_site <- cbind(total=rowSums( check[3:nspecies]),check[c("site_5km","TP")]) # observed occupancy sr
 
 # summarise predicted occupancies status
 pop1 <- popbin[1,,,1] # get occupancy status
 zi <- z[,,1] # observed occupancies
+z_i <- z
+z_i[is.na(z_i)] <- 0
+popbin_i <- popbin
 zi[is.na(zi)] <- 0 # set any na to zero
 pop1[zi==0] <- 0 # make sure we only include observations where the species has been observed
 
-occres1 <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=0,tp=1)
-occr <- list() 
+occres1 <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=1,tp=1)
+sensitivity <- c()
+roc. <- list()
 # repeat for reps 
 for(i in 1:nrep){
   for(t in 1:time){
@@ -172,84 +253,28 @@ for(i in 1:nrep){
    occres1 <- rbind(occres1,occres)
    
   }
-}
+  
+  popbin_i[i,,,][z_i==0] <- 0 
+  sensitivity[i]  <- confusionMatrix(as.factor(c(  popbin_i[i,,,])),as.factor(c(z_i)),positive="1")$byClass[[1]]
+  roc.[[i]] <-   roc(c(z_i),c(psi[i,,,]),direction="<",quiet=T)$auc
 
+}
+dim(z_i)
+sum(z_i== popbin_i[i,,,])/(94*2278*13)
 # plots of model predictive ability
-occres1 <- occres1[occres1$rep==0,]
-ggplot() + geom_density(data=occres1,aes(x=log(sr),group=as.factor(rep)))+geom_density(aes(x=log(sr_site$total)),color="blue")
-eggplot() + geom_density(data=occres1,aes(x=sr_diff,group=as.factor(rep)))
-ggplot() + geom_histogram(data=occres1,aes(x=sr_diff))
-quantile(occres1$sr_diff,0.19)
-###############################################################
-##################### Diagnostic Plots ########################
-###############################################################
+ggplot() + geom_density(data=occres1,aes(x=log(sr),group=as.factor(rep)), adjust=2.5)+
+  geom_density(aes(x=log(sr_site$total)),color="blue", adjust=2.5)
 
-species <- colnames(jas_data[[1]][-1])
-nspecies <- length(species)
-out <- occ_output[[2]]
+ggplot() + geom_histogram(data=sr_site,aes(x=log(total)))
+quantile(occres1$sr_diff,0.20)
 
-# names of covariates
-covs <- c("Temperature spatial","Temperature temporal",
-          "Semi Natural Landcover","Agricultural Landcover"
-          ,"Risk Quotient temporal","Risk Quotient spatial"
-)
+mean(sensitivity)
+quantile(sensitivity,0.025)
+quantile(sensitivity,0.975)
 
-n.cov <- length(covs)
-
-# parameters to check
-parameters=c("mu.beta")
-
-# output <- summary_chains(out,comb.chain = T,keep.samples = F)
-options(max.print=10000);print(out)
-
-# model 
-samples = out$samples
-occ.sum <- data.frame(round(out$summary,3))
-con.f <- occ.sum[occ.sum$Rhat>1.05,] # check parameter convergence
-rhat. <- out$Rhat # all rhat
-
-samp.df <- ggmcmc::ggs(samples) # all samples
-
-# par.p plots all parameters above - mainly diagnostics -  should detect each type of parameter okay
-# parameters need to be a vector of names
-par.p <-sapply(parameters,output_plots,USE.NAMES=T)
-par.p
-
-
-# save plots
-wid = 6
-hei = 3
-
-par.p$mu.beta
-
-# plots of chains, density and parameter estimate 
-
-m.beta <- ggpubr::ggarrange(plotlist = par.p$mu.beta.mu.beta,nrow=1,ncol=2)
-ggsave(paste0("effect_plot/Main Effects.1",'_',file,".png"),m.beta[[1]],width = wid,height = hei)
-ggsave(paste0("effect_plot/Main Effects.2",'_',file,".png"),m.beta[[2]],width = wid,height = hei)
-ggsave(paste0("effect_plot/Main Effects.3",'_',file,".png"),m.beta[[3]],width = wid,height = hei)
-m.beta
-
-# individual species plots 
-ind_plots <- list()
-
-for(i in 1:n.cov){
-  ind_plots[[i]] <-  plot_effects(covs[[i]],species=species,cov=i)
-  ggsave(paste0( "effect_plot/",covs[[i]],'_',file,".png"),ind_plots[[i]],width = wid,height = hei)
-}
-
-ind_plots
-
-# check correlation between parameter estimates
-cor_plot <- ggs_pairs(samp.df,family="mu.beta" ,lower = list(continuous = "density",alpha=0.2))
-ggsave('check_plot/mu_cor_plots.png',cor_plot,width=12,height=9)
-
-rm(out)
-load("jas_out/3_bee_C.3_ID_9.rdata")
-save(out,file="jas_out/3_bee_all_C.3_run.rdata")
-
-
-
+mean(roc.)
+quantile(roc.,0.025)
+quantile(roc.,0.975)
 ###############################################################
 ##################### Run simulations #########################
 ###############################################################
@@ -700,3 +725,11 @@ ggplot(data=b1)+geom_line(aes(x=x,y=mean , color=Landcover )  ,size=1)+
                 panel.background = element_blank()
   )+ylab("Persistence (%)")+xlab("Percentage land cover")
 ggsave("semi_eff.png",plot= semi,width = 6,height=5)
+
+
+
+
+################################################################################
+# Singel Model PP Check 
+
+
