@@ -12,12 +12,12 @@ library(caret)
 source("output_functions.R")
 source("Occ_workflow_V2/outputs_3/combine_chain_4.2.R")
 UK <-  readRDS("UK_map.rds")
-# sre = without year random effect; rre = sum to zero random effect;jd = new year effect not sum zero; new year effect sum zero.0230.02
+# sre = without year random effect; rre = sum to zero random effect;jd = new year effect not sum zero; new year effect sum zero
 # read in data with cover it information
 data="hoverflies"
 
 tribe= "Bacchini"
-rq = "pol_rre"
+rq = "pol_jdrre"
 group = paste0('hoverflies_',rq)
 mod =paste0( "all_",tribe)
 cat(mod,group,"\n")
@@ -75,7 +75,10 @@ covs <- c("Temperature spatial","Temperature temporal",
 n.cov <- length(covs)
 
 # parameters to check
-parameters=c("mu.beta","dtype1.p","beta","gamma","dtype2.p","dtype3.p","gamma","alpha.p")
+parameters=c("mu.beta","beta",
+             "alpha.p",
+             "dtype1.p","dtype2.p","dtype3.p",
+             "gamma")
 
 
 # options(max.print=10000);print(out)
@@ -91,9 +94,14 @@ samp.df <- ggmcmc::ggs(samples) # all samples
 # parameters need to be a vector of names
 par.p <-sapply(parameters,output_plots,samp.df = samp.df,rhat=rhat,species_names = species,simple = T)
 
+ggarrange(plotlist=par.p$alpha.p,nrow=4,ncol=1)
 ggarrange(plotlist=par.p$dtype1.p,nrow=4,ncol=1)
-ggarrange(plotlist=par.p$beta$`Platycheirus albimanus`,nrow=4,ncol=1)
-names(par.p$mu.beta) <- covs
+ggarrange(plotlist=par.p$dtype2.p,nrow=4,ncol=1)
+ggarrange(plotlist=par.p$dtype3.p,nrow=4,ncol=1)
+ggarrange(plotlist=par.p$mu.beta,nrow=4,ncol=1)
+ggarrange(plotlist=sapply(par.p$beta,function(x) x[[6]],simplify = F),nrow=4,ncol=1)
+
+names(par.p$beta) <- covs
 
 ggarrange(plotlist=par.p$alpha.p,nrow=2,ncol=2)
 # save plots
@@ -178,6 +186,7 @@ LONG <- observed$LONG
 nobs <- length(SHORT) # number of observations
 site <- observed$site_5km.n 
 closure <- observed$TP
+year <-  observed$Year
 y <- array(dim=c(nobs,nspecies),0) # predicted observations
 p <- array(dim=c(nobs,nspecies)) # probability occupancy
 
@@ -185,12 +194,13 @@ p <- array(dim=c(nobs,nspecies)) # probability occupancy
 yrep <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=0)
 y_sum <- cbind(y_sum=sum(yrep$obs_count),rep=0)
 srep <- cbind(obs_count= colSums(y),rep=0,snames=0)
+error_r <- vector()
 # observation model
 for(i in 1:nrep){
   for(o in 1:nobs){
     
     # observation probability  
-    p[o,] <- inv_logit_scaled( alpha.p[i,closure[o]] + 
+    p[o,] <- inv_logit_scaled( alpha.p[i,year[o]] + 
                                  d1[i,] + 
                                  d2[i,]*SHORT[o] +
                                  d3[i,]*LONG[o])
@@ -200,11 +210,13 @@ for(i in 1:nrep){
     
   }
   colnames(y) <- colnames(occ) 
+  rowSums(occ)
   yreps <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=i)
   y_sum_i <- cbind(y_sum=sum(yreps$obs_count),rep=i)
   yrep <- rbind(yrep,yreps)
   y_sum <- rbind(y_sum,y_sum_i )
   srep_i <- cbind(obs_count= colSums(y),rep=i,snames=names(colSums(y)))
+  error_r[i] <-sum( (colSums(y)-colSums(occ))^2/(colSums(occ)))
   srep <- rbind(srep,srep_i)
 }
 
@@ -215,8 +227,11 @@ y_sum <- y_sum[-1,]
 srep <- as.data.frame(srep[as.data.frame(srep)$rep!=0,])
 srep$obs_count <- as.numeric(srep$obs_count )
 act <-colSums( occ)
-ggplot() + geom_density(data=yrep,aes(x=obs_count,group=as.factor(rep)),adjust=2.5)+
-  geom_density(aes(x=rowSums(occ)),color="blue", adjust=2.5)
+
+saveRDS( list(total_rep=y_sum,species_rep=srep,s_error=error_r),paste0(group,"_pprep.rds"))
+reps <-readRDS(paste0(group,"_pprep.rds"))
+
+
 
 nm <- unique(srep$snames)
 names(nm) <- unique(srep$snames)

@@ -4,6 +4,7 @@
 #########################################################################################
 # Load packages
 library(sparta)
+library(vegan)
 library(dplyr)
 library(BRCmap)
 library(stringr)
@@ -490,12 +491,17 @@ sp_si_closure <- distinct( occ.dat1[c("CONCEPT","site_5km","closure_per")])
 sp_closure <- distinct( occ.dat1[c("CONCEPT","closure_per")])
 
 # table different variables
-n_sp_cl <- as.data.frame( table(sp_closure$closure_per))
+  # species by closure
+n_sp_cl <- as.data.frame( table(sp_closure$closure_per)) 
 
-n_sp_ev <- as.data.frame( table(sp_si_closure$CONCEPT,sp_si_closure$closure_per))
-n_sp_ev_w<- pivot_wider(n_sp_ev, names_from=Var2, values_from=Freq )            
+  # species evenness by year
+n_sp_ev_w <- as.data.frame( table(sp_si_closure$CONCEPT,sp_si_closure$closure_per)) %>%  
+             pivot_wider(names_from=Var2, values_from=Freq )           
+n_sp_ev_w <- t( n_sp_ev_w[-1])
+evenness <- diversity(n_sp_ev_w)/log(specnumber(n_sp_ev_w))
 
-n_spre_cl <- as.data.frame( table(sp_re_closure$region,sp_re_closure$closure_per))
+  # species by closure and region
+n_spre_cl <- as.data.frame( table(sp_re_closure$region,sp_re_closure$closure_per)) 
 
 # name columns
 colnames(n_sp_cl) <- c("Closure","n_sp_observed")
@@ -509,7 +515,93 @@ ggplot()+ geom_line(data=n_sp_cl,aes(y=n_sp_observed,x=Closure))+
 ggplot()+ geom_line(data=n_spre_cl,aes(y=n_sp_observed,x=Closure,color=region))+
   geom_point(data=n_spre_cl,aes(y=n_sp_observed,x=Closure,color=region))
 
+# biases across covariates
+  # put all their variables into one date frame
+visit1 <- visit 
+visit1$Year <- visit1$Year+1993
+occ_cov <- left_join(distinct(visit1[c("Year","site_5km")]),rq_sum[-c(3,4)], by =c("Year"="year","site_5km"="gr"))
 
+env <- c("temp_anom", "mean_temp", "semi"   ,   "agri")
+
+# observed covariates at visited sites
+for(i in 1:length(env)){
+  
+colnames(cov_assess[[env[i]]])[3] <- env[i] 
+
+occ_cov <- left_join(occ_cov,cov_assess[[env[i]]][c("year","gr",env[i] )], by =c("Year"="year","site_5km"="gr"))
+
+
+}
+
+occ_cov <- occ_cov[!is.na(occ_cov$predators_RQ),]
+
+# merge with uk by dataset
+cov_mer <- left_join(rq_sum[-c(3,4)],cov_assess[[env[1]]][c("year","gr",env[1] )]) 
+
+for(i in 2:length(env)){
+  
+  cov_mer <- left_join(cov_mer,cov_assess[[env[i]]][c("year","gr",env[i] )]) 
+
+}
+
+# combine both data sets
+occ_cov$id <- "Visited sites" 
+cov_mer$id <- "All sites" 
+
+colnames(occ_cov)
+colnames(cov_mer) <- colnames(occ_cov)
+occ_cov <- rbind(occ_cov,cov_mer)
+
+# ensure correct time period
+tp <- data.frame(cbind(Year=unique(occ_cov$Year[order(occ_cov$Year)]),tp=rep(1:4,each=3)))
+all_cv  <- left_join(occ_cov,tp)
+time_period <- list()
+
+check_site <- all_cv %>% count(Year,id)
+
+# loop through closure periods and create plots
+for(i in 1:max(tp$tp)){
+  
+time <- tp[tp$tp==i,]
+min. <- min(time$Year)
+max. <- max(time$Year)
+
+occ_cov <- all_cv[all_cv$tp==i,]
+
+# risk quotient
+my_binwidth = 2
+rq_range <- ggplot(data=occ_cov,aes(x=pollinators_RQ)) +        # Draw hist & density with count on y-axis
+  geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+  geom_density(aes(color=id),bw=my_binwidth) +
+  xlab("Risk quotient")+
+  ggtitle(paste0(min.,"-",max.)) 
+
+
+# agricultural landcover
+my_binwidth = 2
+ag_range <-ggplot(data=occ_cov,aes(x=agri))  +        # Draw hist & density with count on y-axis
+  geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+  geom_density(aes(color=id),bw=my_binwidth) +
+  xlab("Agricultural landcover")
+
+# semi-natural land cover
+se_range <- ggplot(data=occ_cov,aes(x=semi))  +        # Draw hist & density with count on y-axis
+  geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+  geom_density(aes(color=id),bw=my_binwidth) +
+  xlab("Semi-natural landcover") 
+  
+# temperature
+occ_cov$temp <- occ_cov$temp_anom+occ_cov$mean_temp
+my_binwidth = 0.2
+temp_range <- ggplot(data=occ_cov,aes(x=temp))  +        # Draw hist & density with count on y-axis
+  geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+  geom_density(aes(color=id),bw=my_binwidth) +
+  xlab("Temperature (C)") 
+
+time_period[[i]] <- ggarrange(rq_range,ag_range,se_range,temp_range,nrow = 2,ncol=2)
+}
+
+time_period
 #########################################################################
 ########################### covariate plots #############################  
 #########################################################################

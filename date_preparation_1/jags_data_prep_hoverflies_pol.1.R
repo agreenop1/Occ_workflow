@@ -1,5 +1,4 @@
-
-###################################################################################################################
+#########################################################################################
 # 1. Script and functions to match occupancy in the BRC format to environmental         #
 # covariates to be used in dynamic species occupancy models                             #
 #########################################################################################
@@ -385,6 +384,7 @@ uk_plot_f <- ggplot()+ geom_line(data=uk_freq,aes(y=percent,x=TP_visited))+
 region_plot_f <- ggplot()+ geom_line(data=region_freq,aes(y=percent,x=TP_visited,colour=region))+
   geom_point(data=region_freq,aes(y=percent,x=TP_visited,colour=region))
 
+############################################
 # number of observations at different scales
 region_v <- as.data.frame(table(visits_reg$region,visits_reg$TP))
 site_v <- as.data.frame(table(visits_reg$site_5km))
@@ -408,6 +408,7 @@ region_plot_v <- ggplot()+ geom_line(data=region_v,aes(y=Number_of_visits ,x=Clo
 region_plot_v_stacked <-   ggplot( ) + 
   geom_bar(data=region_v,aes( y=Number_of_visits, x=Closure,fill=region),position="stack", stat="identity")
 
+##############################
 # map of total visits per site
 coord <- distinct(read.csv("agcensus.csv",header=T)[2:4]) # read in coordinates for plots 
 site_v  <- left_join(site_v,coord) 
@@ -431,13 +432,26 @@ ggplot() +
         panel.grid.minor = element_blank(),
         panel.background = element_blank())
 
+#################################
 # look at sampling across species 
 occ.dat1 <- occ.dat[occ.dat$CONCEPT %in% colnames(occup[-1]),]
 occ.dat1 <- left_join(occ.dat1,region)
 sp_re_closure <- distinct( occ.dat1[c("CONCEPT","region","closure_per")])
+sp_si_closure <- distinct( occ.dat1[c("CONCEPT","site_5km","closure_per")])
 sp_closure <- distinct( occ.dat1[c("CONCEPT","closure_per")])
-n_sp_cl <- as.data.frame( table(sp_closure$closure_per))
-n_spre_cl <- as.data.frame( table(sp_re_closure$region,sp_re_closure$closure_per))
+
+# table different variables
+# species by closure
+n_sp_cl <- as.data.frame( table(sp_closure$closure_per)) 
+
+# species evenness by year
+n_sp_ev_w <- as.data.frame( table(sp_si_closure$CONCEPT,sp_si_closure$closure_per)) %>%  
+  pivot_wider(names_from=Var2, values_from=Freq )           
+n_sp_ev_w <- t( n_sp_ev_w[-1])
+evenness <- diversity(n_sp_ev_w)/log(specnumber(n_sp_ev_w))
+
+# species by closure and region
+n_spre_cl <- as.data.frame( table(sp_re_closure$region,sp_re_closure$closure_per)) 
 
 # name columns
 colnames(n_sp_cl) <- c("Closure","n_sp_observed")
@@ -450,6 +464,94 @@ ggplot()+ geom_line(data=n_sp_cl,aes(y=n_sp_observed,x=Closure))+
 
 ggplot()+ geom_line(data=n_spre_cl,aes(y=n_sp_observed,x=Closure,color=region))+
   geom_point(data=n_spre_cl,aes(y=n_sp_observed,x=Closure,color=region))
+
+# biases across covariates
+# put all their variables into one date frame
+visit1 <- visit 
+visit1$Year <- visit1$Year+1993
+occ_cov <- left_join(distinct(visit1[c("Year","site_5km")]),rq_sum[-c(3,4)], by =c("Year"="year","site_5km"="gr"))
+
+env <- c("temp_anom", "mean_temp", "semi"   ,   "agri")
+
+# observed covariates at visited sites
+for(i in 1:length(env)){
+  
+  colnames(cov_assess[[env[i]]])[3] <- env[i] 
+  
+  occ_cov <- left_join(occ_cov,cov_assess[[env[i]]][c("year","gr",env[i] )], by =c("Year"="year","site_5km"="gr"))
+  
+  
+}
+
+occ_cov <- occ_cov[!is.na(occ_cov$predators_RQ),]
+
+# merge with uk by dataset
+cov_mer <- left_join(rq_sum[-c(3,4)],cov_assess[[env[1]]][c("year","gr",env[1] )]) 
+
+for(i in 2:length(env)){
+  
+  cov_mer <- left_join(cov_mer,cov_assess[[env[i]]][c("year","gr",env[i] )]) 
+  
+}
+
+# combine both data sets
+occ_cov$id <- "Visited sites" 
+cov_mer$id <- "All sites" 
+
+colnames(occ_cov)
+colnames(cov_mer) <- colnames(occ_cov)
+occ_cov <- rbind(occ_cov,cov_mer)
+
+# ensure correct time period
+tp <- data.frame(cbind(Year=unique(occ_cov$Year[order(occ_cov$Year)]),tp=rep(1:4,each=3)))
+all_cv  <- left_join(occ_cov,tp)
+time_period <- list()
+
+check_site <- all_cv %>% count(Year,id)
+
+# loop through closure periods and create plots
+for(i in 1:max(tp$tp)){
+  
+  time <- tp[tp$tp==i,]
+  min. <- min(time$Year)
+  max. <- max(time$Year)
+  
+  occ_cov <- all_cv[all_cv$tp==i,]
+  
+  # risk quotient
+  my_binwidth = 2
+  rq_range <- ggplot(data=occ_cov,aes(x=pollinators_RQ)) +        # Draw hist & density with count on y-axis
+    geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+    geom_density(aes(color=id),bw=my_binwidth) +
+    xlab("Risk quotient")+
+    ggtitle(paste0(min.,"-",max.)) 
+  
+  
+  # agricultural landcover
+  my_binwidth = 2
+  ag_range <-ggplot(data=occ_cov,aes(x=agri))  +        # Draw hist & density with count on y-axis
+    geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+    geom_density(aes(color=id),bw=my_binwidth) +
+    xlab("Agricultural landcover")
+  
+  # semi-natural land cover
+  se_range <- ggplot(data=occ_cov,aes(x=semi))  +        # Draw hist & density with count on y-axis
+    geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+    geom_density(aes(color=id),bw=my_binwidth) +
+    xlab("Semi-natural landcover") 
+  
+  # temperature
+  occ_cov$temp <- occ_cov$temp_anom+occ_cov$mean_temp
+  my_binwidth = 0.2
+  temp_range <- ggplot(data=occ_cov,aes(x=temp))  +        # Draw hist & density with count on y-axis
+    geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+    geom_density(aes(color=id),bw=my_binwidth) +
+    xlab("Temperature (C)") 
+  
+  time_period[[i]] <- ggarrange(rq_range,ag_range,se_range,temp_range,nrow = 2,ncol=2)
+}
+
+time_period
 
 ########################################################################
 # covariates with explicit site ID need for checks
