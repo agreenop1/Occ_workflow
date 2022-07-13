@@ -14,7 +14,7 @@ UK <-  readRDS("UK_map.rds")
 # sre = without year random effect; rre = sum to zero random effect
 # read in data with cover it information
 data="bees"
-mod = "rre"
+mod = "yrre"
 # species in order they are in occ dataframe!
 jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016.rds"))
 
