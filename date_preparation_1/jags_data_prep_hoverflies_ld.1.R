@@ -62,7 +62,7 @@ obs.n=499 # min threshold for species inclusion where type = all
 
 ################################################################
 # covars
-chem_cov <- read.csv("raw_FERA/species_RQ.csv") # chem data
+chem_cov <- read.csv("raw_FERA/species_RQ_hov.csv") # chem data
 
 # env covariates
 env_cov <- readRDS("env.cov.list.rds")
@@ -79,26 +79,20 @@ temperature$temperature <- temperature$temperature.m+temperature$mean.x
 
 # sum all risk quotients 
 rq_sum <-  chem_cov %>% group_by(year,gr,E,N)%>% 
-  summarise(predators_RQ=sum(predators_RQ,na.rm=T),
-            predators_pollinators_RQ=sum(predators_pollinators_RQ,na.rm=T),
-            pollinators_RQ=sum(pollinators_RQ,na.rm=T))
+  summarise(predators_RQ=sum(predators_RQ,na.rm=T))
 
 # get the mean of the risk quotient
-mean_RQ <- rq_sum %>% group_by(gr) %>% summarise(rq_M_pol= mean(pollinators_RQ),
-                                                 rq_M_pre= mean(predators_RQ),
-                                                 rq_M_ppl= mean(predators_pollinators_RQ))
+mean_RQ <- rq_sum %>% group_by(gr) %>% summarise(rq_M_pre= mean(predators_RQ))
 
 # separate risk quotient into spacial and temporal variable
 RQ <- left_join(rq_sum,mean_RQ)
 
-RQ$rq_A_pol <- RQ$pollinators_RQ - RQ$rq_M_pol
+
 RQ$rq_A_pre <- RQ$predators_RQ - RQ$rq_M_pre
-RQ$rq_A_ppl <- RQ$predators_pollinators_RQ - RQ$rq_M_ppl
+
 
 # zero application
-zero_app <- data.frame(RQ[1:4],rqpol=0-RQ$rq_M_pol,
-                       rqpre=0-RQ$rq_M_pre,
-                       rqppl=0-RQ$rq_M_ppl)
+zero_app <- data.frame(RQ[1:4], rqpre=0-RQ$rq_M_pre)
 
 # covs to be analysed - these are passed to var_prep function (see below):
 # site is currently set as "gr" can be changed in the function
@@ -117,13 +111,14 @@ cov_assess <- c(list(temp_anom=env_cov$temp_anom,
 scale_bin <- c(F,T,T,T,F,T,T,T)
 
 var.x <- c("mean.x","mean.x","mean.x","mean.x",
-           "rq_A_pol","rq_M_pol","temperature","pollinators_RQ") # variable of interest CHECK!
+           "rq_A_pre","rq_M_pre","temperature","predators_RQ") # variable of interest CHECK!
 
-
+rq_p <- cov_assess$RQ[cov_assess$RQ$predators_RQ>0,]
 #################################################################  
 # derive site list  based on common sites in the covariate data and occupancy data
 occ.site <- occ.dat$site_5km
-sites <-function(){list(unique(occ.site), unique(chem_cov$gr),unique(env_cov[[1]]$gr)) }
+
+sites <-function(){list(unique(occ.site), unique(rq_p$gr),unique(env_cov[[1]]$gr)) }
 sites_5km <- Reduce(intersect, sites()) # common list of sites
 
 # FUNCTION #######################################################
@@ -256,8 +251,10 @@ occup[occup==T] <- 1
 # remove sites only visited in one TP
 site_vis <- distinct(visit[c("site","TP")])
 site.v.n1  <- data.frame (table(site_vis$site))
-site.v.n2  <- site.v.n1[site.v.n1$Freq>1,]
 
+# minimum number of closure period
+cp = 1
+site.v.n2  <- site.v.n1[site.v.n1$Freq>cp,]
 # 
 visit <- visit[visit$site%in%site.v.n2$Var1,]
 occup <-  occup[occup$visit%in%visit$visit,]
@@ -320,7 +317,7 @@ if(plots){
 coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
 hover <- read.csv("hoverfly_names.csv")
 
-keep_names <- hover$species[hover$tribe%in%unique(hover$tribe)] # Bacchini Eristalini
+keep_names <- hover$species[hover$tribe%in%"Bacchini"] # Bacchini Eristalini
 
 occ_record <- cbind(occ_tot=rowSums( occup[keep_names]),visit)
 occ_map <- occ_record %>% group_by(TP,site_5km) %>% summarise(occ_sum=occ_tot)
@@ -341,7 +338,7 @@ for(i in 1:12){
   out[[i]] <- ggplot() +
     geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
     ylim(0, 700000)  + geom_tile(data = sy, 
-                                 aes(x = E, y = N, fill =occ_sum))+
+                                 aes(x = E, y = N, fill =log(occ_sum)))+
     scale_fill_continuous(type = "viridis", name = years_n[[i]])+ theme(panel.grid.major = element_blank(), 
                                                                         panel.grid.minor = element_blank(),
                                                                         panel.background = element_blank())
@@ -521,7 +518,7 @@ for(i in 1:max(tp$tp)){
   
   # risk quotient
   my_binwidth = 2
-  rq_range <- ggplot(data=occ_cov,aes(x=pollinators_RQ)) +        # Draw hist & density with count on y-axis
+  rq_range <- ggplot(data=occ_cov,aes(x=predators_RQ)) +        # Draw hist & density with count on y-axis
     geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
     geom_density(aes(color=id),bw=my_binwidth) +
     xlab("Risk quotient")+
@@ -566,11 +563,11 @@ for (i in 1:length(var.names)){
 
 
 # covariates used in simulations
-z1 <- var_prep(zero_app,var.x="rqpol", site="gr", keep.id=T,center=F) # zero application wide format
-z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pol", site="gr", keep.id=T,center=F) # actual application rq temporal
+z1 <- var_prep(zero_app,var.x="rqpre", site="gr", keep.id=T,center=F) # zero application wide format
+z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pre", site="gr", keep.id=T,center=F) # actual application rq temporal
 saveRDS(list(zero_application=z1,actual=z0),"zero_app_hovpol.rds") 
 write.csv(covars_id$temp_anom,"site_id.csv")
-saveRDS(covars_id,"covars_wide_hovpol.rds")
+saveRDS(covars_id,"covars_wide_hovpol_pre.rds")
 
 # double check all covs are in the right order
 for (i in 1:length(covars_id)){
@@ -786,13 +783,53 @@ visit$jstan <- visit$Jul_date-mean(visit$Jul_date)
 cat("Minimum observations",obs.n,"\n")
 cat(nrow(site_id),"sites","\n")
 cat(ncol(occup[-1]),"species","\n")
-
-cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"pol",".rds"),"\n")
-
-
+cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"ld",".rds"),"\n")
 saveRDS(list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion),file.name)
+
+
+
+
+occupancy_visits = left_join(occup,visit)
+ 
+inf_col = colnames(visit)
+x <- colnames(occup[-1])
+
+species_distribution <- function(x){
+  
+  # subset observations on site and region
+  site_rn <-  occupancy_visits[c(x,inf_col)] %>% group_by(region ,site_5km) %>% summarize(total= sum(!!sym(x)))
+  
+  # check how many sites in each region have recorded observations
+  site_rn[site_rn$total>0,3] <- 1
+  tot_obs <- sum( site_rn[3])
+  site_n <-  site_rn %>% group_by(region ) %>% summarize(total= sum(total),
+                                                         total_percentage= (sum(total)/tot_obs)*100  )
+  site_n$species <- x 
+  site_n
+    
+}
+
+
+species_dlist <- lapply(x,species_distribution )
+species_dlist <- do.call(rbind,species_dlist)
+################################################################################
+hv_species <- read.csv("hover_species_reduced.csv")
+hv_species$species_short[hv_species$species_short=="Eristalis nemorum"] <- "Eristalis interruptus"
+
+
+hv_species <- hv_species[!is.na(hv_species$Crop),]
+hover_species_reduced <- hv_species[hv_species$species_short%in%  colnames(occup[-1]),] # hoverflies in stn and occupancy
+hover_miss_occ <- colnames(occup[-1])[!colnames(occup[-1])%in%hover_species_reduced$species_short] # missing hoverflies in occupancy
+stn_species_miss <- hv_species$species_short[!hv_species$species_short%in%hover_species_reduced$species_short] #  missing hoverflies in stn
+
+saveRDS(hover_species_reduced$species_short,"hover_cropSpecies.rds")
+write.csv(hover_miss_occ,"hover_miss_occupancy.csv")
+write.csv(stn_species_miss,"hover_miss_stn.csv")
+cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"ld",".rds"),"\n")
+keep_names <- readRDS("hover_cropSpecies.rds")
+
+
+
 out <- list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion)
-out$region
-out$nregion
-out[[2]]$Year
-out[[4]]
+occ <- out[[1]]
+ncol(occ[c(keep_names)])

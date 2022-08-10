@@ -11,24 +11,30 @@ library(forcats)
 library(caret)
 source("output_functions.R")
 source("Occ_workflow_V2/outputs_3/combine_chain_4.2.R")
+
+# uk map
 UK <-  readRDS("UK_map.rds")
 # sre = without year random effect; rre = sum to zero random effect;jd = new year effect not sum zero; new year effect sum zero
 # read in data with cover it information
 data="hoverflies"
 
-tribe= "Bacchini"
-rq = "pol_jdrre"
+
+
+
+tribe= "crop"
+rq = "ld_jdrre"
 group = paste0('hoverflies_',rq)
 mod =paste0( "all_",tribe)
 cat(mod,group,"\n")
 
 
-hover <- read.csv("hoverfly_names.csv")
+hover <-   readRDS("hover_cropSpecies.rds")
+
 #table(hover$tribe)
 #genus <- distinct(data.frame(genus=str_split(hover$species," ",simplify = T)[,1],tribe=hover$tribe))
 #write.csv(genus,"genus.csv")
 unique(hover$tribe)
-keep_names <- hover$species[hover$tribe==tribe]
+keep_names <-  readRDS("hover_cropSpecies.rds")
 
 # species in order they are in occ dataframe!
 jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016","pol",".rds"))
@@ -56,7 +62,6 @@ occ_output <- readRDS(paste0("jas_out/all_",tribe,"_hoverflies_",rq,'_summary.rd
 out <- occ_output
 
 cat((nrow(out$sims.list$alpha.phi)*5)/3,"iterations used before thin per chain","\n")
-
 ################################################################################
 ########################### Diagnostic Plots ###################################
 ################################################################################
@@ -75,10 +80,10 @@ covs <- c("Temperature spatial","Temperature temporal",
 n.cov <- length(covs)
 
 # parameters to check
-parameters=c("mu.beta","beta",
-             "alpha.p",
-             "dtype1.p","dtype2.p","dtype3.p",
-             "gamma")
+parameters=c("mu.beta","beta","alpha.p")#,
+          #   ,
+           #  "dtype1.p","dtype2.p","dtype3.p",
+           #  "gamma")
 
 
 # options(max.print=10000);print(out)
@@ -149,11 +154,12 @@ covs <- c(base) # covariate list
 
 #  multiple species check
 nrep <- 200 #dim(out$sims.list$beta)[1]
-popocc <- array(dim=c(nrep,nspecies,sites,time)) # occupancy estimates
 beta <- out$sims.list$beta[1:nrep,,] # beta coefficient
 gamma <-  out$sims.list$gamma[1:nrep,] # colonization
 init <-  out$sims.list$init.occ[1:nrep,] # initial occupancy
 alpha <- out$sims.list$alpha.phi[1:nrep,] # intercepts
+region.psi <- out$sims.list$region.psi[1:nrep,] # region re
+region.cov <- jas_data$nregion
 
 # estimates of population occupancy for species
 psi <- sim.pop(psi.start = init,
@@ -162,10 +168,19 @@ psi <- sim.pop(psi.start = init,
                 alpha = alpha,
                 psi =  array(dim=c(nrep,nspecies,sites,time)),
                 cov.array = f_array(covs),
-                species=T)
+                species=T,
+               region = region.psi,
+               region.cov = jas_data$region,
+               complex=T)
 
-# predict occupancy state
-popbin <- apply(psi,c(2,3,4),function(x){rbinom(length(x),1,x)})
+# predict occupancy state - write out occupancies to save memory
+dir.create("binary_occupancy")
+for(i in 1:nrep){
+  
+  a.x  <-  apply(psi[i,,,],c(2,3),function(x){rbinom(length(x),1,x)})
+  saveRDS(a.x,file=paste0("binary_occupancy/",data,"_rep_",i,"_",mod,".rds"))
+  
+}
 
 # observed occupancy
 z <- jas_data[[3]]
@@ -186,120 +201,104 @@ LONG <- observed$LONG
 nobs <- length(SHORT) # number of observations
 site <- observed$site_5km.n 
 closure <- observed$TP
-year <-  observed$Year
+Year <-  observed$Year
 y <- array(dim=c(nobs,nspecies),0) # predicted observations
 p <- array(dim=c(nobs,nspecies)) # probability occupancy
 
+
 # aggregate all observations seen at a site
-yrep <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=0)
-y_sum <- cbind(y_sum=sum(yrep$obs_count),rep=0)
-srep <- cbind(obs_count= colSums(y),rep=0,snames=0)
-error_r <- vector()
+vis_rep <- list()
+sum_rep <- list()
+spe_rep <- list()
+
+v_x_o <- vector()
+v_x_e <- vector()
+s_x_o <- vector()
+s_x_e <- vector()
+e <- 0.0001
+
 # observation model
 for(i in 1:nrep){
+  
+  zrep <- readRDS(paste0("binary_occupancy/",data,"_rep_",i,"_",mod,".rds"))
+  
   for(o in 1:nobs){
     
+    
     # observation probability  
-    p[o,] <- inv_logit_scaled( alpha.p[i,year[o]] + 
+    p[o,] <- inv_logit_scaled( alpha.p[i,Year[o]] + 
                                  d1[i,] + 
                                  d2[i,]*SHORT[o] +
                                  d3[i,]*LONG[o])
     
     # predicted occupancy
-    y[o,] <- rbinom(species,1,popbin[i,,site[o],closure[o]]*p[o,])
+    y[o,] <- rbinom(species,1,zrep[,site[o],closure[o]]*p[o,])
     
   }
   colnames(y) <- colnames(occ) 
-  rowSums(occ)
-  yreps <- cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=i)
-  y_sum_i <- cbind(y_sum=sum(yreps$obs_count),rep=i)
-  yrep <- rbind(yrep,yreps)
-  y_sum <- rbind(y_sum,y_sum_i )
-  srep_i <- cbind(obs_count= colSums(y),rep=i,snames=names(colSums(y)))
-  error_r[i] <-sum( (colSums(y)-colSums(occ))^2/(colSums(occ)))
-  srep <- rbind(srep,srep_i)
+  
+  vis_rep[[i]] <-data.frame(cbind(obs_count= rowSums(y),vis[c("site_5km","TP")],rep=i))
+  sum_rep[[i]] <-data.frame(cbind(y_sum=sum(y),rep=i))
+  spe_rep[[i]] <-data.frame(cbind(obs_count= colSums(y),rep=i,snames=names(colSums(y))))
+  
+  # could look at transitions states (AHM 2 p243)?
+  s_x_e[i] <- sum((colSums(y) - colSums(p))^2/(colSums(p)+e)) # chi square discrepancy over species
+  s_x_o[i] <- sum((colSums(occ)  - colSums(p))^2/ (colSums(p)+e))
+  v_x_e[i] <- sum((rowSums(y) - rowSums(p))^2/(rowSums(p)+e)) # chi square discrepancy over visits
+  v_x_o[i] <- sum((rowSums(occ)  - rowSums(p))^2/ (rowSums(p)+e))
+  
+  
 }
 
 
 # look at predicted values vs. real values
-yrep <- yrep[yrep$rep!=0,]
-y_sum <- y_sum[-1,]
-srep <- as.data.frame(srep[as.data.frame(srep)$rep!=0,])
-srep$obs_count <- as.numeric(srep$obs_count )
+mean(s_x_e>s_x_o)
+mean(v_x_e>v_x_o)
+
+xys  <- seq(min(c(s_x_e,s_x_o))-5, max(c(s_x_e,s_x_o))+5)
+xyv  <- seq(min(c(v_x_e,v_x_o))-5, max(c(v_x_e,v_x_o))+5)
+
+mins <- min(c(s_x_e,s_x_o))
+ggplot() + geom_point(aes(v_x_e,v_x_o )) +geom_line(aes(xyv,xyv))
+ggplot() + geom_point(aes(s_x_e,s_x_o )) +geom_line(aes(xys,xys))
+
+# put lists into date frames
+vis_rep. <- do.call(rbind, vis_rep)
+sum_rep. <- do.call(rbind, sum_rep)
+spe_rep. <- do.call(rbind, spe_rep)
+
+spe_rep.$obs_count <- as.numeric(spe_rep.$obs_count)
+
+
 act <-colSums( occ)
 
-saveRDS( list(total_rep=y_sum,species_rep=srep,s_error=error_r),paste0(group,"_pprep.rds"))
-reps <-readRDS(paste0(group,"_pprep.rds"))
 
 
-
-nm <- unique(srep$snames)
-names(nm) <- unique(srep$snames)
+# plot all species fit
+nm <- unique(spe_rep.$snames)
+names(nm) <- unique(spe_rep.$snames)
 splots <- lapply(nm,function(x){
   
-ggplot() + geom_histogram(data=srep[srep$snames==x,] ,aes(x=obs_count))+
-  geom_vline(aes(xintercept=act[names(act)==x]),color="blue")+ggtitle(paste(x))
+  ggplot() + geom_histogram(data=spe_rep.[spe_rep.$snames==x,] ,aes(x=obs_count))+
+    geom_vline(aes(xintercept=act[names(act)==x]),color="blue")+ggtitle(paste(x))
 })
 
-ind_pre_plots <- ggarrange(plotlist = splots,nrow=4,ncol=4)
+indplots <-ggarrange(plotlist=splots,ncol=4,nrow=4)
 
-sum_p <- ggplot() + geom_histogram(data=as.data.frame(y_sum),aes(x=y_sum),bins =40)+
-  geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")+ggtitle('Total Count Estimates')
-
-
-# state model only
-# get where species were observed at a site
-check <- cbind(occ,vis[c("site_5km","TP")]) %>% group_by(site_5km,TP) %>% summarise_all(sum) # observed occupancy
-check[3:nspecies][check[3:species]>0] <- 1
-sr_site <- cbind(total=rowSums( check[3:nspecies]),check[c("site_5km","TP")]) # observed occupancy sr
-
-# summarise predicted occupancies status
-pop1 <- popbin[1,,,1] # get occupancy status
-zi <- z[,,1] # observed occupancies
-z_i <- z
-z_i[is.na(z_i)] <- 0
-popbin_i <- popbin
-zi[is.na(zi)] <- 0 # set any na to zero
-pop1[zi==0] <- 0 # make sure we only include observations where the species has been observed
-
-occres1 <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=1,tp=1)
-sensitivity <- c()
-roc. <- list()
-# repeat for reps 
-for(i in 1:nrep){
-  for(t in 1:time){
-    
-   pop1 <- popbin[i,,,t]
-   zi <- z[,,t]
-   zi[is.na(zi)] <- 0
-   pop1[zi==0] <- 0
-   occres <- data.frame(sr=colSums(pop1),sr_diff=colSums(pop1)-colSums(zi),rep=i,tp=t)
-   occres1 <- rbind(occres1,occres)
-   
-  }
+for(i in 1:length(indplots)){
   
-  popbin_i[i,,,][z_i==0] <- 0 
-  sensitivity[i]  <- confusionMatrix(as.factor(c(  popbin_i[i,,,])),as.factor(c(z_i)),positive="1")$byClass[[1]]
-  roc.[[i]] <-   roc(c(z_i),c(psi[i,,,]),direction="<",quiet=T)$auc
-
+  ggsave(paste0("model_fit/",tribe,"_",mod,"_",data,"_species_fit_",i,".png"), indplots[[i]],width=10,height=8)
+  
 }
 
-# plots of model predictive ability
-dense_p <- ggplot() + geom_density(data=occres1,aes(x=log(sr),group=as.factor(rep)), adjust=2.5)+
-  geom_density(aes(x=log(sr_site$total)),color="blue", adjust=2.5) 
+# overall model fit
+sum_p <- ggplot() + geom_histogram(data= sum_rep.
+                                   ,aes(x=y_sum),bins =40)+
+  geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")+ggtitle(paste0('Total Count Estimates \nModel = ',data," ",mod))
 
-quantile(occres1$sr_diff,0.20)
-
-ms <-  round(mean(sensitivity),2)
-lbs <- round(quantile(sensitivity,0.025),2)
-ubs <- round(quantile(sensitivity,0.975),2)
+ggsave(paste0("model_fit/",tribe,"_",mod,"_",data,"_all_fit.png"), sum_p,width=4,height=4 )
 
 
-hist_eco <- ggplot() + geom_histogram(data=sr_site,aes(x=log(total)))+
-  ggtitle(paste0("Difference between observed and expected","\n","Mean accuracy = ",ms," lb = ",lbs," ub = ",ubs))
-
-
-ggarrange()
 ###############################################################
 ##################### Run simulations #########################
 ###############################################################

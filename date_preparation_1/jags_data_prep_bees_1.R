@@ -16,7 +16,8 @@ library(ggplot2)
 library(ggpubr)
 years_n <- seq(1994,2016,2)
 UK <-  readRDS("UK_map.rds")
-plots <- F
+plots <- T
+
 # closure period 1 = yearly and 2 = biennial 
 # Lag determines whether the covariates for t (lag = T) or t-1 are used to predict persistence
 
@@ -62,6 +63,17 @@ obs.n=499 # min threshold for species inclusion where type = all
 ################################################################
 # covars
 chem_cov <- read.csv("raw_FERA/species_RQ.csv") # chem data
+fat_acid <- chem_cov[is.na(chem_cov$MOA),]
+chem_cov$MOA[is.na(chem_cov$MOA)] <- "fatty_acid"
+comp5 <- distinct(chem_cov[c("year","gr")])
+exp_rqs  <- expand.grid(unique(comp5$year),unique(comp5$gr))
+
+# na due to none applicable category for toxicity rather than 0 where not used on crop 
+# na can be changed to 0 as pesticide does not pose threat in that way 
+
+# individual chemicals 
+chem_wide <- pivot_wider(chem_cov[c("year","gr","E","N", "MOA","pollinators_RQ")],names_from = MOA,values_from = pollinators_RQ )
+chem_wide[5:14][is.na( chem_wide[5:14])] <- 0 
 
 # env covariates
 env_cov <- readRDS("env.cov.list.rds")
@@ -71,6 +83,43 @@ rq_sum <-  chem_cov %>% group_by(year,gr,E,N)%>%
            summarise(predators_RQ=sum(predators_RQ,na.rm=T),
            predators_pollinators_RQ=sum(predators_pollinators_RQ,na.rm=T),
            pollinators_RQ=sum(pollinators_RQ,na.rm=T))
+
+
+################################################################################
+# join some risk quotient with individual chemicals
+chem_names <- unique(chem_cov$MOA  )
+
+
+
+chem_map <- sapply(chem_names,function(x,data){
+
+year_x  <- unique(data$year)
+plots <- list()
+
+
+  for (i in year_x){    
+    
+    mapx <- data[data$year==i,]
+
+    plots[[paste0(i)]] <- ggplot() +
+              geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+              ylim(0, 700000)  + geom_tile(data = mapx, 
+                                           aes_string(x = "E", y = "N",fill=x) ) +
+              scale_fill_continuous(type = "viridis", name = i)+ theme(panel.grid.major = element_blank(), 
+                                                                                  panel.grid.minor = element_blank(),
+                                                                                  panel.background = element_blank())
+    }
+
+ggarrange(plotlist = plots)
+},data=chem_wide,simplify=F)
+
+
+
+chem_wide$s_rq <- rowSums(chem_wide[5:14])
+cor(chem_wide[5:15])
+chem_map$Pyrethroids
+
+################################################################################
 
 # get the mean of the risk quotient
 mean_RQ <- rq_sum %>% group_by(gr) %>% summarise(rq_M_pol= mean(pollinators_RQ),
@@ -639,7 +688,7 @@ if(plots){
   names(env_plots) <- names(id_plots)
   
   p1 <- env_plots
-  ggsave("pmap.png",plot=p1, dpi=600, dev='tiff',   height=4.5, width=4.5, units="in") 
+  ggsave("check_plot/rq_a_map.png",plot=p1$RQsum_M[[2]], dpi=600, dev='tiff',   height=8, width=4, units="in") 
   
   # FUNCTION ##############################################################
   #  Check for temporal correlation in parameters at sites through years
@@ -742,9 +791,9 @@ if(plots){
       geom_point(aes(x=name,y=M,group=1))+
       geom_errorbar(aes(x=name,ymin=M-SD,ymax=M+SD))})
   
-  ggsave("check_plot/RQts.png",plot=time_trends$RQsum,width = 8,height = 2)
-  ggsave("check_plot/AGts.png",plot=time_trends$agri,width = 8,height = 2)
-  ggsave("check_plot/SEts.png",plot=time_trends$semi,width = 8,height = 2)
+  ggsave("check_plot/RQts.png",plot=time_trends$RQsum_A,width = 8,height = 5)
+  ggsave("check_plot/AGts.png",plot=time_trends$agri,width = 8,height = 5)
+  ggsave("check_plot/SEts.png",plot=time_trends$semi,width = 8,height = 5)
   
   ##########################################################################
   # variable trends over time
@@ -811,4 +860,17 @@ cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,
 saveRDS(list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion),file.name)
 jas_data <- list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion)
 jas_data$region
-jas_data$nregion
+
+covars <- jas_data[[4]]# covariates
+
+covs <- list(temp.m=covars$mean_temp,temp.a=covars$temp_anom,semi=covars$semi,agri=covars$agri,RQA=covars$RQsum_A,RQM=covars$RQsum_M)
+
+# create array for covs
+row = nrow(covars[[1]]); col = ncol(covars[[1]]); nmat = length(covs)
+cov.array <- array(dim=c(row,col,nmat))
+
+for(n in 1:nmat){
+  cov.array[,,n]  <- as.matrix(covs[[n]])
+}
+
+ 

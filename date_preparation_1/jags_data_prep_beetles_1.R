@@ -4,20 +4,25 @@
 #########################################################################################
 # Load packages
 library(sparta)
+library(vegan)
 library(dplyr)
 library(BRCmap)
+library(stringr)
+source("brcmap_f.R")
 library(dplyr)
 library(reshape2)
 library(tidyr)
 library(ggplot2)
 library(ggpubr)
-source("brcmap_f.R")
+years_n <- seq(1994,2016,2)
 UK <-  readRDS("UK_map.rds")
+plots <- T
+
 # closure period 1 = yearly and 2 = biennial 
 # Lag determines whether the covariates for t (lag = T) or t-1 are used to predict persistence
-i
+
 closure.period=2
-years_n <- seq(1994,2016,2)
+
 # If lag = T then occupancy (z) for time period t is dependent on z in t-1 & persistence driven by covariates in t-1.
 # Here t is either equal to a year or every 2 years dependent on closure period.
 # We need occurence records spanning 1st time period we have covariates (t1) to the last time period + t (ti+t),
@@ -31,8 +36,8 @@ years_n <- seq(1994,2016,2)
 lag = T
 
 # group
-occ.dat = readRDS("occurrence_recs/hoverflies.rds")
-group.name="hoverflies"
+  occ.dat = readRDS("occurrence_recs/beetles.rds")
+group.name="beetles"
 
 # sites at the 5km resolution  
 occ.dat$grid <- nchar(as.character(occ.dat$TO_GRIDREF))
@@ -57,7 +62,7 @@ obs.n=499 # min threshold for species inclusion where type = all
 
 ################################################################
 # covars
-chem_cov <- read.csv("raw_FERA/species_RQ.csv") # chem data
+chem_cov <- read.csv("raw_FERA/species_RQ_hov.csv") # chem data
 
 # env covariates
 env_cov <- readRDS("env.cov.list.rds")
@@ -74,26 +79,20 @@ temperature$temperature <- temperature$temperature.m+temperature$mean.x
 
 # sum all risk quotients 
 rq_sum <-  chem_cov %>% group_by(year,gr,E,N)%>% 
-  summarise(predators_RQ=sum(predators_RQ,na.rm=T),
-            predators_pollinators_RQ=sum(predators_pollinators_RQ,na.rm=T),
-            pollinators_RQ=sum(pollinators_RQ,na.rm=T))
+  summarise(predators_RQ=sum(predators_RQ,na.rm=T))
 
 # get the mean of the risk quotient
-mean_RQ <- rq_sum %>% group_by(gr) %>% summarise(rq_M_pol= mean(pollinators_RQ),
-                                                 rq_M_pre= mean(predators_RQ),
-                                                 rq_M_ppl= mean(predators_pollinators_RQ))
+mean_RQ <- rq_sum %>% group_by(gr) %>% summarise(rq_M_pre= mean(predators_RQ))
 
 # separate risk quotient into spacial and temporal variable
 RQ <- left_join(rq_sum,mean_RQ)
 
-RQ$rq_A_pol <- RQ$pollinators_RQ - RQ$rq_M_pol
+
 RQ$rq_A_pre <- RQ$predators_RQ - RQ$rq_M_pre
-RQ$rq_A_ppl <- RQ$predators_pollinators_RQ - RQ$rq_M_ppl
+
 
 # zero application
-zero_app <- data.frame(RQ[1:4],rqpol=0-RQ$rq_M_pol,
-                       rqpre=0-RQ$rq_M_pre,
-                       rqppl=0-RQ$rq_M_ppl)
+zero_app <- data.frame(RQ[1:4], rqpre=0-RQ$rq_M_pre)
 
 # covs to be analysed - these are passed to var_prep function (see below):
 # site is currently set as "gr" can be changed in the function
@@ -113,7 +112,6 @@ scale_bin <- c(F,T,T,T,F,T,T,T)
 
 var.x <- c("mean.x","mean.x","mean.x","mean.x",
            "rq_A_pre","rq_M_pre","temperature","predators_RQ") # variable of interest CHECK!
-
 
 
 #################################################################  
@@ -295,6 +293,8 @@ visit$SHORT[between(visit$L,2,3)] <- 1
 visit$LONG <- 0
 visit$LONG[visit$L>3] <- 1
 
+visit$Year <- as.numeric(str_sub(visit$visit,start=7,end = 10 ))-1993
+nYear <- length(unique(visit$Year))
 #########################################################################
 # make sure occupancy and visit data match
 if(all(occup$visit==visit$visit)){"Occupancy and visit data match"}
@@ -314,7 +314,7 @@ if(plots){
   coord <- distinct(read.csv("agcensus.csv",header=T)[2:4])
   hover <- read.csv("hoverfly_names.csv")
   
-  keep_names <- hover$species[hover$tribe%in%unique(hover$tribe)] # Bacchini Eristalini
+  keep_names <- hover$species[hover$tribe%in%"Bacchini"] # Bacchini Eristalini
   
   occ_record <- cbind(occ_tot=rowSums( occup[keep_names]),visit)
   occ_map <- occ_record %>% group_by(TP,site_5km) %>% summarise(occ_sum=occ_tot)
@@ -335,7 +335,7 @@ if(plots){
     out[[i]] <- ggplot() +
       geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
       ylim(0, 700000)  + geom_tile(data = sy, 
-                                   aes(x = E, y = N, fill =occ_sum))+
+                                   aes(x = E, y = N, fill =log(occ_sum)))+
       scale_fill_continuous(type = "viridis", name = years_n[[i]])+ theme(panel.grid.major = element_blank(), 
                                                                           panel.grid.minor = element_blank(),
                                                                           panel.background = element_blank())
@@ -343,6 +343,211 @@ if(plots){
   
   out
 }
+#########################################################################
+#################### Risk of Bias Assessment ############################
+#########################################################################
+# recording efforts
+sxc <- distinct( visit[c("TP","site_5km")])
+n.svisits <-  as.data.frame( table(sxc$site_5km)) # number of time period sites visited in
+colnames(n.svisits)[1] <- "site_5km"
+
+# region observation 
+region <-distinct( read.csv("osr_pesticide_5km_1994_2010_v3.csv")[c("ref_5km","region")]) 
+region$region <- tolower(region$region)
+region <-distinct(region) 
+colnames(region)[1] <- "site_5km"
+
+n.svisits.r <- left_join(n.svisits,region)
+visits_reg <- left_join(visit,region)
+
+# frequency of observations at the uk and regional scale
+uk_freq <- do.call(rbind, lapply(2:13,function(x) data.frame(percent=(sum(n.svisits.r$Freq==x )/sum(n.svisits.r$Freq>0 ))*100,TP_visited=x)))
+
+region_freq <- do.call(rbind, lapply(2:13,function(x){
+  region_freq <- n.svisits.r %>% group_by(region) %>% summarise(percent=(sum(Freq==x)/sum(Freq>0)*100))
+  region_freq$TP_visited <- x
+  region_freq$region <- as.factor(region_freq$region )
+  region_freq
+}))
+
+# plots of sampling frequency at different scales
+# uk
+uk_plot_f <- ggplot()+ geom_line(data=uk_freq,aes(y=percent,x=TP_visited))+
+  geom_point(data=uk_freq,aes(y=percent,x=TP_visited))
+
+# regional
+region_plot_f <- ggplot()+ geom_line(data=region_freq,aes(y=percent,x=TP_visited,colour=region))+
+  geom_point(data=region_freq,aes(y=percent,x=TP_visited,colour=region))
+
+############################################
+# number of observations at different scales
+region_v <- as.data.frame(table(visits_reg$region,visits_reg$TP))
+site_v <- as.data.frame(table(visits_reg$site_5km))
+site_f <- distinct(visit[c("site_5km","TP")])
+site_f <- as.data.frame(table(site_f$site_5km))
+
+# set column names
+colnames(region_v) <- c("region","Closure","Number_of_visits")
+colnames(site_v) <- c("gr","number_of_visits")
+colnames(site_f) <- c("gr","number_of_closure")
+
+# create different regional parameters
+region_v_c <- region_v %>% group_by(Closure) %>% summarise(total=sum(Number_of_visits))
+region_v <- left_join(region_v ,region_v_c )
+region_v$Closure <- as.numeric(region_v$Closure)
+
+# regional plots of the total number of visits
+region_plot_v <- ggplot()+ geom_line(data=region_v,aes(y=Number_of_visits ,x=Closure,colour=region))+
+  geom_point(data=region_v,aes(y=Number_of_visits ,x=Closure,colour=region))
+
+region_plot_v_stacked <-   ggplot( ) + 
+  geom_bar(data=region_v,aes( y=Number_of_visits, x=Closure,fill=region),position="stack", stat="identity")
+
+##############################
+# map of total visits per site
+coord <- distinct(read.csv("agcensus.csv",header=T)[2:4]) # read in coordinates for plots 
+site_v  <- left_join(site_v,coord) 
+site_f  <- left_join(site_f,coord) 
+
+# total number of visits by 5km cell
+ggplot() +
+  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+  ylim(0, 700000)  + geom_tile(data = site_v , 
+                               aes(x = E, y = N, fill =number_of_visits))+
+  scale_fill_continuous(type = "viridis", name = 'Total visits')+ theme(panel.grid.major = element_blank(), 
+                                                                        panel.grid.minor = element_blank(),
+                                                                        panel.background = element_blank())
+# total number of closure periods Visited in by 5km cell
+ggplot() +
+  geom_path(data = UK$britain, aes(x = long, y = lat, group = group)) + xlim(100000, 700000) +
+  ylim(0, 700000)  + geom_tile(data = site_f , 
+                               aes(x = E, y = N, fill =number_of_closure))+
+  scale_fill_continuous(type = "viridis", name = 'Total number of closure periods \n visited in')+ 
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+#################################
+# look at sampling across species 
+occ.dat1 <- occ.dat[occ.dat$CONCEPT %in% colnames(occup[-1]),]
+occ.dat1 <- left_join(occ.dat1,region)
+sp_re_closure <- distinct( occ.dat1[c("CONCEPT","region","closure_per")])
+sp_si_closure <- distinct( occ.dat1[c("CONCEPT","site_5km","closure_per")])
+sp_closure <- distinct( occ.dat1[c("CONCEPT","closure_per")])
+
+# table different variables
+# species by closure
+n_sp_cl <- as.data.frame( table(sp_closure$closure_per)) 
+
+# species evenness by year
+n_sp_ev_w <- as.data.frame( table(sp_si_closure$CONCEPT,sp_si_closure$closure_per)) %>%  
+  pivot_wider(names_from=Var2, values_from=Freq )           
+n_sp_ev_w <- t( n_sp_ev_w[-1])
+evenness <- diversity(n_sp_ev_w)/log(specnumber(n_sp_ev_w))
+
+# species by closure and region
+n_spre_cl <- as.data.frame( table(sp_re_closure$region,sp_re_closure$closure_per)) 
+
+# name columns
+colnames(n_sp_cl) <- c("Closure","n_sp_observed")
+n_sp_cl$Closure <- as.numeric(n_sp_cl$Closure)
+colnames(n_spre_cl) <- c("region","Closure","n_sp_observed")
+n_spre_cl$Closure <- as.numeric(n_spre_cl$Closure)
+
+ggplot()+ geom_line(data=n_sp_cl,aes(y=n_sp_observed,x=Closure))+
+  geom_point(data=n_sp_cl,aes(y=n_sp_observed,x=Closure))
+
+ggplot()+ geom_line(data=n_spre_cl,aes(y=n_sp_observed,x=Closure,color=region))+
+  geom_point(data=n_spre_cl,aes(y=n_sp_observed,x=Closure,color=region))
+
+# biases across covariates
+# put all their variables into one date frame
+visit1 <- visit 
+visit1$Year <- visit1$Year+1993
+occ_cov <- left_join(distinct(visit1[c("Year","site_5km")]),rq_sum[-c(3,4)], by =c("Year"="year","site_5km"="gr"))
+
+env <- c("temp_anom", "mean_temp", "semi"   ,   "agri")
+cov_assess. <- cov_assess
+# observed covariates at visited sites
+for(i in 1:length(env)){
+  
+  colnames(cov_assess.[[env[i]]])[3] <- env[i] 
+  
+  occ_cov <- left_join(occ_cov,cov_assess.[[env[i]]][c("year","gr",env[i] )], by =c("Year"="year","site_5km"="gr"))
+  
+  
+}
+
+occ_cov <- occ_cov[!is.na(occ_cov$predators_RQ),]
+
+# merge with uk by dataset
+cov_mer <- left_join(rq_sum[-c(3,4)],cov_assess.[[env[1]]][c("year","gr",env[1] )]) 
+
+for(i in 2:length(env)){
+  
+  cov_mer <- left_join(cov_mer,cov_assess.[[env[i]]][c("year","gr",env[i] )]) 
+  
+}
+
+# combine both data sets
+occ_cov$id <- "Visited sites" 
+cov_mer$id <- "All sites" 
+
+colnames(occ_cov)
+colnames(cov_mer) <- colnames(occ_cov)
+occ_cov <- rbind(occ_cov,cov_mer)
+
+# ensure correct time period
+tp <- data.frame(cbind(Year=unique(occ_cov$Year[order(occ_cov$Year)]),tp=rep(1:4,each=3)))
+all_cv  <- left_join(occ_cov,tp)
+time_period <- list()
+
+check_site <- all_cv %>% count(Year,id)
+
+# loop through closure periods and create plots
+for(i in 1:max(tp$tp)){
+  
+  time <- tp[tp$tp==i,]
+  min. <- min(time$Year)
+  max. <- max(time$Year)
+  
+  occ_cov <- all_cv[all_cv$tp==i,]
+  
+  # risk quotient
+  my_binwidth = 2
+  rq_range <- ggplot(data=occ_cov,aes(x=predators_RQ)) +        # Draw hist & density with count on y-axis
+    geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+    geom_density(aes(color=id),bw=my_binwidth) +
+    xlab("Risk quotient")+
+    ggtitle(paste0(min.,"-",max.)) 
+  
+  
+  # agricultural landcover
+  my_binwidth = 2
+  ag_range <-ggplot(data=occ_cov,aes(x=agri))  +        # Draw hist & density with count on y-axis
+    geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+    geom_density(aes(color=id),bw=my_binwidth) +
+    xlab("Agricultural landcover")
+  
+  # semi-natural land cover
+  se_range <- ggplot(data=occ_cov,aes(x=semi))  +        # Draw hist & density with count on y-axis
+    geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+    geom_density(aes(color=id),bw=my_binwidth) +
+    xlab("Semi-natural landcover") 
+  
+  # temperature
+  occ_cov$temp <- occ_cov$temp_anom+occ_cov$mean_temp
+  my_binwidth = 0.2
+  temp_range <- ggplot(data=occ_cov,aes(x=temp))  +        # Draw hist & density with count on y-axis
+    geom_histogram(aes(y=..density..,fill=id),position="identity", binwidth = my_binwidth,alpha=0.2,color='black') +
+    geom_density(aes(color=id),bw=my_binwidth) +
+    xlab("Temperature (C)") 
+  
+  time_period[[i]] <- ggarrange(rq_range,ag_range,se_range,temp_range,nrow = 2,ncol=2)
+}
+
+time_period
+
 ########################################################################
 # covariates with explicit site ID need for checks
 var.names = names(cov_assess)
@@ -355,11 +560,11 @@ for (i in 1:length(var.names)){
 
 
 # covariates used in simulations
-z1 <- var_prep(zero_app,var.x="rqpol", site="gr", keep.id=T,center=F) # zero application wide format
-z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pol", site="gr", keep.id=T,center=F) # actual application rq temporal
+z1 <- var_prep(zero_app,var.x="rqpre", site="gr", keep.id=T,center=F) # zero application wide format
+z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pre", site="gr", keep.id=T,center=F) # actual application rq temporal
 saveRDS(list(zero_application=z1,actual=z0),"zero_app_hovpol.rds") 
 write.csv(covars_id$temp_anom,"site_id.csv")
-saveRDS(covars_id,"covars_wide_hovpol.rds")
+saveRDS(covars_id,"covars_wide_hovpol_pre.rds")
 
 # double check all covs are in the right order
 for (i in 1:length(covars_id)){
@@ -562,7 +767,7 @@ visit <- left_join(visit,region[c("site_5km","region")])
 
 # region ecological
 region.cov <- left_join(data.frame(site_5km=rownames(zobs[1,,])),region)
-
+nregion <-  length(unique(region.cov$region.n))
 # order check
 if(!all(rownames(zobs[1,,])==region.cov$site_5km)) { cat("check sites are in the correct order")}
 
@@ -576,8 +781,5 @@ cat("Minimum observations",obs.n,"\n")
 cat(nrow(site_id),"sites","\n")
 cat(ncol(occup[-1]),"species","\n")
 
-cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"pre",".rds"),"\n")
+saveRDS(list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion),file.name)
 
-
-saveRDS(list(occup,visit,zobs,covars,closure.period,region=region.cov),file.name)
-out <- list(occup,visit,zobs,covars,closure.period,region=region.cov)

@@ -15,6 +15,7 @@ UK <-  readRDS("UK_map.rds")
 # read in data with cover it information
 data="bees"
 mod = "yrre"
+file=""
 # species in order they are in occ dataframe!
 jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016.rds"))
 
@@ -60,7 +61,7 @@ covs <- c("Temperature spatial","Temperature temporal",
 n.cov <- length(covs)
 
 # parameters to check
-parameters=c("alpha.phi","mu.beta")
+parameters=c("alpha.phi","beta", "mu.beta","init.occ" ) #, "region.psi"
 
 
 # options(max.print=10000);print(out)
@@ -80,11 +81,12 @@ obs.p <- sapply(c("alpha.p", "dtype3.p","dtype1.p","dtype2.p"),
                         samp.df =samp.df ,
                         rhat= rhat,species_names = species,simple =T,simplify = F)
 
-ggarrange(plotlist=par.p$mu.beta,nrow=4,ncol=1)
-ggarrange(plotlist=sapply(par.p$beta,function(x) x[[6]],simplify = F),nrow=4,ncol=1)
-ggarrange(plotlist= obs.p$alpha.p ,nrow=4,ncol=1)
-
-ggarrange( plotlist=obs.p$dtype1.p,ncol=1, nrow=4)
+ggarrange(plotlist=par.p$mu.beta,nrow=4,ncol=1) # mu beta
+ggarrange(plotlist=sapply(par.p$beta,function(x) x[[6]],simplify = F),nrow=4,ncol=1) # beta
+ggarrange(plotlist= par.p$alpha.phi ,nrow=4,ncol=1) # year intercept obs
+ggarrange( plotlist=par.p$region.psi,ncol=1, nrow=4)  # region
+ggarrange( plotlist=par.p$init.occ,ncol=1, nrow=4)  # initial occupancy
+ggarrange( plotlist=obs.p$dtype1.p,ncol=1, nrow=4) # dtype.1
 
 # save plots
 wid = 6
@@ -104,17 +106,17 @@ m.beta
 ind_plots <- list()
 
 for(i in 1:n.cov){
-  ind_plots[[i]] <-  plot_effects(covs[[i]],species=species,cov=i)
+  ind_plots[[i]] <-  plot_effects(covs[[i]],species=species,cov=i,out = out,rhat=rhat)
   ggsave(paste0( "effect_plot/",covs[[i]],'_',file,".png"),ind_plots[[i]],width = wid,height = hei)
 }
-
+plot_effects()
 ind_plots
 
 # check correlation between parameter estimates
-cor_plot <- ggs_pairs(samp.df,family=c("alpha.p") ,lower = list(continuous = "density",alpha=0.2))
-ggsave('check_plot/mu_cor_plots.png',cor_plot,width=12,height=9)
+#cor_plot <- ggs_pairs(samp.df,family=c("alpha.p") ,lower = list(continuous = "density",alpha=0.2))
+#ggsave('check_plot/mu_cor_plots.png',cor_plot,width=12,height=9)
 
-rm(out)
+#rm(out)
 #load("jas_out/3_bee_C.3_ID_9.rdata")
 #save(out,file="jas_out/3_bee_all_C.3_run.rdata")
 
@@ -130,11 +132,13 @@ covs <- c(base) # covariate list
 
 
 #  multiple species check
-nrep <- 200#dim(out$sims.list$beta)[1]
+nrep <- 150 #dim(out$sims.list$beta)[1]
 beta <- out$sims.list$beta[1:nrep,,] # beta coefficient
 gamma <-  out$sims.list$gamma[1:nrep,] # colonization
 init <-  out$sims.list$init.occ[1:nrep,] # initial occupancy
 alpha <- out$sims.list$alpha.phi[1:nrep,] # intercepts
+region.psi <- out$sims.list$region.psi[1:nrep,] # region re
+region.cov <- jas_data$nregion
 
 # estimates of population occupancy for species
 psi <- sim.pop(psi.start = init,
@@ -143,7 +147,12 @@ psi <- sim.pop(psi.start = init,
                 alpha = alpha,
                 psi =  array(dim=c(nrep,nspecies,sites,time)),
                 cov.array = f_array(covs),
-                species=T)
+                species=T,
+               region = region.psi,
+               region.cov = jas_data$region
+               )
+
+
 
 # predict occupancy state - write out occupancies to save memory
 dir.create("binary_occupancy")
@@ -173,7 +182,7 @@ LONG <- observed$LONG
 nobs <- length(SHORT) # number of observations
 site <- observed$site_5km.n 
 closure <- observed$TP
-Year <- observed$Year
+Year <- observed$TP
 y <- array(dim=c(nobs,nspecies),0) # predicted observations
 p <- array(dim=c(nobs,nspecies)) # probability occupancy
 
@@ -213,18 +222,29 @@ for(i in 1:nrep){
   sum_rep[[i]] <-data.frame(cbind(y_sum=sum(y),rep=i))
   spe_rep[[i]] <-data.frame(cbind(obs_count= colSums(y),rep=i,snames=names(colSums(y))))
   
-  s_x_o[i] <- sum((colSums(y) - colSums(p))^2/sqrt(colSums(p)+e)) # chi square discrepancy over species
-  s_x_e[i] <- sum((colSums(occ)  - colSums(p))^2/ sqrt(colSums(p)+e))
-  v_x_o[i] <- sum((rowSums(y) - rowSums(p))^2/sqrt(rowSums(p)+e)) # chi square discrepancy over visits
-  v_x_e[i] <- sum((rowSums(occ)  - rowSums(p))^2/ sqrt(rowSums(p)+e))
+  # could look at transitions states (AHM 2 p243)?
+  s_x_e[i] <- sum((colSums(y) - colSums(p))^2/(colSums(p)+e)) # chi square discrepancy over species
+  s_x_o[i] <- sum((colSums(occ)  - colSums(p))^2/ (colSums(p)+e))
+  v_x_e[i] <- sum((rowSums(y) - rowSums(p))^2/(rowSums(p)+e)) # chi square discrepancy over visits
+  v_x_o[i] <- sum((rowSums(occ)  - rowSums(p))^2/ (rowSums(p)+e))
   
   
 }
 
 
 # look at predicted values vs. real values
-mean(s_x_e>s_x_o)
-mean(v_x_e>v_x_o)
+species_p <- mean(s_x_e>s_x_o)
+visit_p <- mean(v_x_e>v_x_o)
+
+xys  <- seq(min(c(s_x_e,s_x_o))-5, max(c(s_x_e,s_x_o))+5 )
+xyv  <- seq(min(c(v_x_e,v_x_o))-5, max(c(v_x_e,v_x_o))+5 )
+
+mins <- min(c(s_x_e,s_x_o))
+
+visit_pp_plot <- ggplot() + geom_point(aes(v_x_o,v_x_e )) + geom_line(aes(xyv,xyv)) + ggtitle(paste0(mod," ","Visit B p-value = ",visit_p ))
+species_pp_plot <- ggplot() + geom_point(aes(s_x_o,s_x_e )) + geom_line(aes(xys,xys)) + ggtitle(paste0("Species B p-value = ",species_p))
+
+ggsave(paste0("model_fit/", data,"_",mod,".png") ,ggarrange(visit_pp_plot,species_pp_plot),width = 7,height = 5)
 
 # put lists into date frames
 vis_rep. <- do.call(rbind, vis_rep)
@@ -237,7 +257,7 @@ spe_rep.$obs_count <- as.numeric(spe_rep.$obs_count )
 act <-colSums( occ)
 
 
-
+# plot all species fit
 nm <- unique(spe_rep.$snames)
 names(nm) <- unique(spe_rep.$snames)
 splots <- lapply(nm,function(x){
@@ -246,13 +266,20 @@ splots <- lapply(nm,function(x){
     geom_vline(aes(xintercept=act[names(act)==x]),color="blue")+ggtitle(paste(x))
 })
 
-indplots <-ggarrange(plotlist=splots,ncol=4,nrow=4)
-indplots
+indplots <-ggpubr::ggarrange(plotlist=splots,ncol=4,nrow=4)
 
-sum_p <- ggplot() + geom_histogram(data= sum_rep,aes(x=y_sum),bins =40)+
-  geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")+ggtitle('Total Count Estimates')
+for(i in 1:length(indplots)){
+  
+ggsave(paste0("model_fit/",mod,"_",data,"_species_fit_",i,".png"), indplots[[i]],width=10,height=8)
+  
+}
 
+# overall model fit
+sum_p <- ggplot() + geom_histogram(data= sum_rep.
+                                   ,aes(x=y_sum),bins =40)+
+  geom_vline(aes(xintercept=sum(rowSums(occ))),color="blue")+ggtitle(paste0('Total Count Estimates \nModel = ',data," ",mod))
 
+ggsave(paste0("model_fit/",mod,"_",data,"_all_fit.png"), sum_p,width=4,height=4 )
 
 ###############################################################
 ##################### Run simulations #########################
@@ -704,11 +731,5 @@ ggplot(data=b1)+geom_line(aes(x=x,y=mean , color=Landcover )  ,size=1)+
                 panel.background = element_blank()
   )+ylab("Persistence (%)")+xlab("Percentage land cover")
 ggsave("semi_eff.png",plot= semi,width = 6,height=5)
-
-
-
-
-################################################################################
-# Singel Model PP Check 
 
 
