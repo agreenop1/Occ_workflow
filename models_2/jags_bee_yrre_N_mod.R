@@ -10,14 +10,14 @@ i <- as.numeric(commandArgs(trailingOnly = TRUE))[1]
 
 set.seed(i) # 1:3 depending on chain
 
-group = 'hoverflies'
+group = 'bee_yrre_N'
 mod = 3
 cat(mod,group,"\n")
 
 # data formatted for jags
 
-
-jas_data <- readRDS("data_hoverflies_all.499_1994.2016.rds")
+  
+jas_data <- readRDS("data_bees_all.499_1994.2016.rds")
 
 
 # output files
@@ -92,6 +92,7 @@ cat("Ecological model covariate structure","\n")
 cat(vars,sep="+ \n")
 cat(formula,"\n")
 
+
 ##########################################################################
 ################# OCCUPANCY MODEL ########################################
 
@@ -103,7 +104,11 @@ win.data <-    list(y = y[1:nspecies] ,
                     LONG = visit$LONG,
                     nobs = nrow(occup),
                     COVS=cov.array,
-                    ncov=nmat)
+                    ncov=nmat,
+                    Year=visit$Year,
+                    nYear=jas_data$nYear,
+                    region=jas_data$region,
+                    nregion=jas_data$nregion)
 
 # Specify model in BUGS language for vertical data format
 mod = " model {
@@ -112,7 +117,7 @@ mod = " model {
     # by species
     for (s in 1:nspecies){ 
       
-      init.occ[s] ~ dunif(0,1) # initial occupancy
+      init.occ[s] ~ dnorm(mu.alpha.psi,tau.alpha.psi) # initial occupancy
       
       logitgamma[s] ~ dnorm(mu.gamma,tau.gamma)  #  colonisation prior -heterogeneity between species
       logit(gamma[s]) <- logitgamma[s]
@@ -127,10 +132,13 @@ mod = " model {
     
     # ecology model hyperpriors
     mu.alpha.phi ~ dnorm(0,0.01) # persistence intercept (expected value=0, so persistence=0.5)
+    mu.alpha.psi ~ dnorm(0,0.01)
     mu.gamma ~ dnorm(0,0.01) # colonisation intercept
     
     tau.alpha.phi ~ dt(0,1,1)T(0,) # for SD truncated student t - approx half cauchy
+    tau.alpha.psi ~ dt(0,1,1)T(0,)
     tau.gamma ~ dt(0,1,1)T(0,) 
+    tau.region.psi ~ dt(0,1,1)T(0,) 
     
     # covariate hyperpriors
     for(n in 1:ncov){
@@ -139,6 +147,12 @@ mod = " model {
     tau.beta[n] ~ dt(0,1,1)T(0,) # sd
     }
     
+      # random region effect - sum to zero
+      for (t in 1:(nregion-1)) {
+      region.psi[t] ~ dnorm(0,tau.region.psi)
+    }
+    
+      region.psi[nregion] <- -sum(region.psi[1:(nregion-1)]) 
     
     # OBSERVATION MODEL
     # Observation model priors
@@ -148,9 +162,13 @@ mod = " model {
       dtype3.p[i] ~ dnorm(mu.d3.p,tau.p3)
     }
     
-    for (t in 1:nclosure) {
+    # random year effect - sum to zero
+      for (t in 1:(nYear-1)) {
       alpha.p[t] ~ dnorm(0,tau.p)
     }
+    
+    alpha.p[nYear] <- -sum(alpha.p[1:(nYear-1)]) 
+    
     # observation model hyperpriors 
     mu.d1.p ~ dnorm(-2,0.01) # mean species effect = 0.12 (probability of being recorded) on list length 1
     mu.d2.p ~ dnorm(0,0.01)
@@ -168,10 +186,15 @@ mod = " model {
     # Ecological model: Define state conditional on parameters
     for (s in 1:nspecies){ 
       for (i in 1:nsites){ # 5km site
-        z[s,i,1] ~ dbern(init.occ[s])
+         
+        logit(init.psi[s,i])   <- init.occ[s] + region.psi[region[i]]
+        
+        z[s,i,1] ~ dbern(init.psi[s,i])
+        
         for (t in 2:nclosure){
-          # persistence at i for t is function of pesticides
-          logit(phi[s,i,t]) <- alpha.phi[s] + formula
+        
+        # persistence at i for t is function of pesticides
+        logit(phi[s,i,t]) <- alpha.phi[s] + formula 
           
           
           z[s,i,t] ~ dbern(z[s,i,t-1]*phi[s,i,t] + (1-z[s,i,t-1])*gamma[s])
@@ -182,7 +205,7 @@ mod = " model {
     # Observation model
     for (s in 1:nspecies){
       for (i in 1:nobs){
-        logit(p[s,i]) <- alpha.p[closure[i]] + dtype1.p[s] + dtype2.p[s]*SHORT[i] +
+        logit(p[s,i]) <- alpha.p[Year[i]] + dtype1.p[s] + dtype2.p[s]*SHORT[i] +
           dtype3.p[s]*LONG[i]
         
         y[i,s] ~ dbern(z[s,site[i],closure[i]]*p[s,i])
@@ -191,7 +214,7 @@ mod = " model {
   }  
   "
 mod.sub <-gsub("formula",formula,mod)
-cat(file = "model.txt",mod.sub)
+cat(file = paste0(group,nmat,'.txt'),mod.sub)
 cat(mod.sub)
 
 # Initial values
@@ -212,7 +235,7 @@ source("jags_rjags_func_2.1.R")
 
 
 # Call JAGS and summarize posteriors
-out <- jagsG(win.data, inits,n.adapt = na, params, "model.txt", n.chains = nc,
+out <- jagsG(win.data, inits,n.adapt = na, params,paste0(group,nmat,'.txt'), n.chains = nc,
              n.thin = nt, n.iter = ni, n.burnin = nb, jags.seed = i)
 
 
@@ -228,4 +251,3 @@ if(daisy){
 
 # save runtime
 save(out,file=rdataFile)
-
