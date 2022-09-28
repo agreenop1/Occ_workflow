@@ -36,8 +36,8 @@ years_n <- seq(1994,2016,2)
 lag = T
 
 # group
-occ.dat = readRDS("occurrence_recs/hoverflies.rds")
-group.name="hoverflies"
+occ.dat = readRDS("occurrence_recs/ladybird.rds")
+group.name="ladybird"
 
 # sites at the 5km resolution  
 occ.dat$grid <- nchar(as.character(occ.dat$TO_GRIDREF))
@@ -786,110 +786,4 @@ cat(ncol(occup[-1]),"species","\n")
 cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"ld",".rds"),"\n")
 saveRDS(list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion),file.name)
 
-
-
-
-occupancy_visits = left_join(occup,visit)
- 
-inf_col = colnames(visit)
-x <- colnames(occup[-1])
-
-species_distribution <- function(x){
-  
-  # subset observations on site and region
-  site_rn <-  occupancy_visits[c(x,inf_col)] %>% group_by(region ,site_5km) %>% summarize(total= sum(!!sym(x)))
-  
-  # check how many sites in each region have recorded observations
-  site_rn[site_rn$total>0,3] <- 1
-  tot_obs <- sum( site_rn[3])
-  site_n <-  site_rn %>% group_by(region ) %>% summarize(total= sum(total),
-                                                         total_percentage= (sum(total)/tot_obs)*100  )
-  site_n$species <- x 
-  site_n
-    
-}
-
-
-species_dlist <- lapply(x,species_distribution )
-species_dlist <- do.call(rbind,species_dlist)
-################################################################################
-hv_species <- read.csv("hover_species_reduced.csv")
-hv_species$species_short[hv_species$species_short=="Eristalis nemorum"] <- "Eristalis interruptus"
-
-
-hv_species <- hv_species[!is.na(hv_species$Crop),]
-hover_species_reduced <- hv_species[hv_species$species_short%in%  colnames(occup[-1]),] # hoverflies in stn and occupancy
-hover_miss_occ <- colnames(occup[-1])[!colnames(occup[-1])%in%hover_species_reduced$species_short] # missing hoverflies in occupancy
-stn_species_miss <- hv_species$species_short[!hv_species$species_short%in%hover_species_reduced$species_short] #  missing hoverflies in stn
-
-saveRDS(hover_species_reduced$species_short,"hover_cropSpecies.rds")
-write.csv(hover_miss_occ,"hover_miss_occupancy.csv")
-write.csv(stn_species_miss,"hover_miss_stn.csv")
-cat(file.name <- paste0("Model_data/data_",group.name,"_",f.name,"_",start_year,".",end_year,"ld",".rds"),"\n")
-keep_names <- readRDS("hover_cropSpecies.rds")
-
-
-
-out <- list(occup,visit,zobs,covars,closure.period,nYear=nYear,region=region.cov$region.n,nregion=nregion)
-occ <- out[[1]]
-ncol(occ[c(keep_names)])
-
-# Neural Occupancy ######################################################
-################ NEED TO RUN TO GET CORRECT LIST LENGTH #################
-#  set up data for JAGS format
-# format data
-occ <- formatOccData(taxa = occ.dat$CONCEPT,
-                     site = occ.dat$TO_GRIDREF,
-                     survey =  occ.dat$TO_STARTDATE,includeJDay=T)
-
-
-
-
-#  create separate date frames for the occupancy info & visit info
-occup <- occ[[1]]
-visit <- occ[[2]]
-occup[occup==T] <- 1
-###############################################
-# remove sites only visited in one TP
-site_vis <- distinct(visit[c("site","TP")])
-site.v.n1  <- data.frame (table(site_vis$site))
-
-# minimum number of closure period
-cp = 1
-site.v.n2  <- site.v.n1[site.v.n1$Freq>cp,]
-# 
-visit <- visit[visit$site%in%site.v.n2$Var1,]
-occup <-  occup[occup$visit%in%visit$visit,]
-
-# species selection #####################################################
-library(rnrfa)
-#  filter out species with fewer than obs.n observations
-if(type=="all"){
-  cat("All species selected","\n")
-  obs.n=obs.n
-  occ.n <- data.frame(sp=colnames(occup[-1]),tot= colSums(occup[-1]))
-  occ.n <- occ.n[occ.n$tot>obs.n,]
-  occup <- occup[c("visit",paste(occ.n$sp))]
-  f.name=paste0("all.",obs.n)
-}
-colSums(occup[-1][order(colSums(occup[-1]))])
-
-ep_data <- cbind( occup[c("visit","Episyrphus balteatus")] ,visit)
-ep_data <- ep_data[ep_data$TP>1989,]
-ep_data$nyear <- ep_data$TP-1990
-ep_data$nsite <- as.numeric(as.factor(ep_data$site))-1
-
-
-
-
-# Convert NGR to easting and northing
-x = osg_parse(ep_data$site) 
-# Extract easting and northing from the list, x
-ep_data$east = x[[1]]
-ep_data$north = x[[2]]  
-
-hov <- ep_data[colnames(ep_data)[c(2,5,7:11)]]
-colnames(hov  )[1] = 'y'
-write.csv(hov,'C:/Users/arrgre/PycharmProjects/pythonProject/hov_nn.csv')
-.
 

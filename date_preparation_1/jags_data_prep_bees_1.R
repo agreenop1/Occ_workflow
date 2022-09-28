@@ -16,7 +16,7 @@ library(ggplot2)
 library(ggpubr)
 years_n <- seq(1994,2016,2)
 UK <-  readRDS("UK_map.rds")
-plots <- T
+plots <- F
 
 # closure period 1 = yearly and 2 = biennial 
 # Lag determines whether the covariates for t (lag = T) or t-1 are used to predict persistence
@@ -63,10 +63,7 @@ obs.n=499 # min threshold for species inclusion where type = all
 ################################################################
 # covars
 chem_cov <- read.csv("raw_FERA/species_RQ.csv") # chem data
-fat_acid <- chem_cov[is.na(chem_cov$MOA),]
-chem_cov$MOA[is.na(chem_cov$MOA)] <- "fatty_acid"
-comp5 <- distinct(chem_cov[c("year","gr")])
-exp_rqs  <- expand.grid(unique(comp5$year),unique(comp5$gr))
+
 
 # na due to none applicable category for toxicity rather than 0 where not used on crop 
 # na can be changed to 0 as pesticide does not pose threat in that way 
@@ -263,6 +260,11 @@ if(closure.period==2){
   n_periods <- rep(1:(length(years)/closure.period),each=2) # Create vector half the length of years
   clsr_per <- data.frame(n_periods,years) #  assign new temporal ID to each year
   colnames(clsr_per)[1:2] <- c("closure_per","YEAR")
+  
+  # save closure period by year
+  write.csv(clsr_per,"Occ_workflow_V2/date_preparation_1/clsr_per.csv")
+  
+  
   occ.dat <- left_join(occ.dat,clsr_per) #  Match in the main occupancy data year to new closure period
   
   print (distinct(occ.dat[c("YEAR","closure_per")]))}else{
@@ -431,8 +433,8 @@ for (i in 1:length(var.names)){
 z1 <- var_prep(zero_app,var.x="rqpol", site="gr", keep.id=T,center=F) # zero application wide format
 z0 <- var_prep(cov_assess$RQsum_A,var.x="rq_A_pol", site="gr", keep.id=T,center=F) # actual application rq temporal
 saveRDS(list(zero_application=z1,actual=z0),"zero_app_hovpol.rds") 
-write.csv(covars_id$temp_anom,"site_id.csv")
-saveRDS(covars_id,"covars_wide_hovpol.rds")
+write.csv(covars_id$temp_anom,"site_id_bees.csv")
+saveRDS(covars_id,"covars_wide_bees.rds")
 
 # double check all covs are in the right order
 for (i in 1:length(covars_id)){

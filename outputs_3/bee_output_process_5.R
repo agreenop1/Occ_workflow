@@ -1,160 +1,204 @@
 ################################################################################
+################ Process Bayesian Model Outputs ################################
 ################################################################################
-##################### simulate different scenarios #############################
+# This script processes the outputs from the models and carries out a number of#
+# posterior predictive checks and also plot some figures of the results. It is #
+# worth noting that the size of some of the files can crash the memory so keep #
+# an eye on this. The input the script takes is an output file from jags that  #
+# that combines and summarizes the occupancy outputs.                          #
+
+
+# needed packages
 library(brms)
 library(BRCmap)
+library(ggpubr)
 library(ggmcmc)
 library(ggplot2)
 library(dplyr)
 library(forcats)
 library(caret)
+
+# these scripts contain some miscellaneous functions to help with summarizing the outputs
 source("output_functions.R")
 source("Occ_workflow_V2/outputs_3/combine_chain_4.2.R")
 UK <-  readRDS("UK_map.rds")
-# sre = without year random effect; rre = sum to zero random effect
-# read in data with cover it information
-data="bees"
-mod = "yrre"
-file=""
-# species in order they are in occ dataframe!
-jas_data <- readRDS(paste0("Model_data/data_",data,"_all.499_1994.2016.rds"))
+
+# summary function
+summary_f <- function(x){
+  mean.x <- apply(x,1,mean)
+  ql <- apply(x,1,quantile,0.025)
+  qu <- apply(x,1,quantile,0.975)
+  cbind(mean.x,ql,qu)}
+
+
+## read in data ##
+# output from jags  
+occ_output <- readRDS(paste0("jas_out/3_bee_yrre_summary.rds"))#
+out <- occ_output
+
+# input file for jags
+jas_data <- readRDS(paste0("Model_data/data_bees_all.499_1994.2016.rds"))
 
 
 
 # remove id column
-occ <- jas_data[[1]][-1]
-vis <- jas_data[[2]]
+occ <- jas_data[[1]][-1] # observed occupancy
+vis <- jas_data[[2]] # observed visit data 
 occdat <- cbind(occ,vis) 
 
 
-# the number of sites and number of time periods
+# the number of sites, time periods and species
 time = 13
 sites = nrow(jas_data[[4]]$temp_anom)
-species = ncol(occ)
+nspecies = ncol(occ)
 
-# covariates
+# covariates in the order they were in the jags model (used in simulations)
 covars = jas_data[[4]]
 base <- list(temp.m=covars$mean_temp,temp.a=covars$temp_anom,semi=covars$semi,agri=covars$agri,RQA=covars$RQsum_A,RQM=covars$RQsum_M)
 
 
-# output from jags  
-occ_output <- readRDS(paste0("jas_out/3_bee_",mod,"_summary.rds"))#
-out <- occ_output
-
+# number of iterations found in the files before thin
 cat((nrow(out$sims.list$alpha.phi)*5)/3,"iterations used before thin per chain","\n")
 
 ################################################################################
 ########################### Diagnostic Plots ###################################
-################################################################################
+# In this section we run diagnostic plots on the chains to check convergence.  #
 
-# model 
+# species names 
 species <- colnames(occ)
-nspecies <- length(species)
 
 
-# names of covariates
+# names of covariates in the order they are in the model
 covs <- c("Temperature spatial","Temperature temporal",
           "Semi Natural Landcover","Agricultural Landcover"
           ,"Risk Quotient temporal","Risk Quotient spatial"
 )
 
+# number of covariates
 n.cov <- length(covs)
-
-# parameters to check
-parameters=c("alpha.phi","beta", "mu.beta","init.occ" ) #, "region.psi"
-
 
 # options(max.print=10000);print(out)
 
+
+# model samples
 samples = out$samples
+
+# summary of model samples
 occ.sum <- data.frame(round(out$summary,3))
 con.f <- occ.sum[occ.sum$Rhat>1.05,] # check parameter convergence
-rhat <- out$Rhat # all rhat
+rhat <- out$Rhat # all rhats from jags outputs
 
-samp.df <- ggmcmc::ggs(samples) # all samples
+samp.df <- ggmcmc::ggs(samples) # all samples in a format that can be read by the plot function (see ggmcmc package)
 
-# par.p plots all parameters above - mainly diagnostics -  should detect each type of parameter okay
-# parameters need to be a vector of names
+### check convergence and chain diagnostics of required parameters ###
+# parameters to check
+parameters=c("alpha.phi", "mu.beta","init.occ" ) #, "region.psi"
+
+
+
+## output plots ##
+# x = parameter name  (parameters need to be a vector of names)
+# samp.df = samples in ggmcmc format
+# rhat = rhat from jags output 
+# species_names=NULL
+# simple = T/F determines where the density plot is included (not advised for species level parameters)
+
+# ecological model parameters
 par.p <- sapply(parameters,output_plots,samp.df = samp.df,rhat=rhat,species_names = species,simple = T,simplify = F)
-obs.p <- sapply(c("alpha.p", "dtype3.p","dtype1.p","dtype2.p"),
-                        output_plots,
-                        samp.df =samp.df ,
-                        rhat= rhat,species_names = species,simple =T,simplify = F)
 
 ggarrange(plotlist=par.p$mu.beta,nrow=4,ncol=1) # mu beta
 ggarrange(plotlist=sapply(par.p$beta,function(x) x[[6]],simplify = F),nrow=4,ncol=1) # beta
 ggarrange(plotlist= par.p$alpha.phi ,nrow=4,ncol=1) # year intercept obs
 ggarrange( plotlist=par.p$region.psi,ncol=1, nrow=4)  # region
 ggarrange( plotlist=par.p$init.occ,ncol=1, nrow=4)  # initial occupancy
+
+# observation model parameters
+obs.p <- sapply(c("alpha.p","dtype1.p"),
+                        output_plots,
+                        samp.df =samp.df ,
+                        rhat= rhat,species_names = species,simple =T,simplify = F)
+
+
 ggarrange( plotlist=obs.p$dtype1.p,ncol=1, nrow=4) # dtype.1
 
-# save plots
+
+## save plots ##
 wid = 6
 hei = 3
 
-
-
 # plots of chains, density and parameter estimate 
-
 m.beta <- ggpubr::ggarrange(plotlist = par.p$mu.beta,nrow=2,ncol=1)
-ggsave(paste0("effect_plot/Main Effects.1",'_',tribe,group,".png"),m.beta[[1]],width = wid,height = hei)
-ggsave(paste0("effect_plot/Main Effects.2",'_',tribe,group,".png"),m.beta[[2]],width = wid,height = hei)
-ggsave(paste0("effect_plot/Main Effects.3",'_',tribe,group,".png"),m.beta[[3]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.1",'_',tribe,'_',group,".png"),m.beta[[1]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.2",'_',tribe,'_',group,".png"),m.beta[[2]],width = wid,height = hei)
+ggsave(paste0("effect_plot/Main Effects.3",'_',tribe,'_',group,".png"),m.beta[[3]],width = wid,height = hei)
 m.beta
 
-# individual species plots 
-ind_plots <- list()
+## individual species plots ##
+ind_plots <- list() # output list for species plots
 
+# plot_effects is a function that plots the individual species parameter estimates for the covariates #
+# covs = list of covariate names                                                                      #
+# species = species names (in the order they are in the occupancy data)                               #
+# out = jags output                                                                                   #
+# rhat = rhat from jags output                                                                        #
+
+# cycle through covariates and get individual species parameters
 for(i in 1:n.cov){
+  
+  # output plot for species for each covariate
   ind_plots[[i]] <-  plot_effects(covs[[i]],species=species,cov=i,out = out,rhat=rhat)
+  
+  # save this output in a file called effect_plot
   ggsave(paste0( "effect_plot/",covs[[i]],'_',file,".png"),ind_plots[[i]],width = wid,height = hei)
 }
-plot_effects()
+
+# look at all individual species parameters
 ind_plots
 
 # check correlation between parameter estimates
-#cor_plot <- ggs_pairs(samp.df,family=c("alpha.p") ,lower = list(continuous = "density",alpha=0.2))
-#ggsave('check_plot/mu_cor_plots.png',cor_plot,width=12,height=9)
+cor_plot <- ggs_pairs(samp.df,family=c("mu.beta") ,lower = list(continuous = "density",alpha=0.2))
+ggsave('check_plot/mu_cor_plots.png',cor_plot,width=12,height=9)
 
-#rm(out)
-#load("jas_out/3_bee_C.3_ID_9.rdata")
-#save(out,file="jas_out/3_bee_all_C.3_run.rdata")
 
 #################################################################
-############# PP Checks #########################################
-#################################################################
-# State Model
-# aggregate observations where a species was observed at a site
+############# Posterior Predictive Checks #######################
+# In this section we run some simulations to look at posterior  #
+# predictive checks.                                            #
 
-
-# simulation
 covs <- c(base) # covariate list
 
+# the function we run here predicts occupancy based on the model parameters
+# keep an eye on the number of samples (nrep) due to memory issues
 
-#  multiple species check
-nrep <- 150 #dim(out$sims.list$beta)[1]
-beta <- out$sims.list$beta[1:nrep,,] # beta coefficient
+#  number of samples
+nrep <- 200 #dim(out$sims.list$beta)[1]
+
+# parameters from the model
+beta <- out$sims.list$beta[1:nrep,,] # beta coefficient (persistence)
 gamma <-  out$sims.list$gamma[1:nrep,] # colonization
 init <-  out$sims.list$init.occ[1:nrep,] # initial occupancy
-alpha <- out$sims.list$alpha.phi[1:nrep,] # intercepts
-region.psi <- out$sims.list$region.psi[1:nrep,] # region re
-region.cov <- jas_data$nregion
+alpha <- out$sims.list$alpha.phi[1:nrep,] # intercept (persistence) 
+region.psi <- out$sims.list$region.psi[1:nrep,] # region (initial occupancy)
+region.cov <- jas_data$nregion # number of regions
 
+## this function runs the population simulations ##
 # estimates of population occupancy for species
-psi <- sim.pop(psi.start = init,
+
+
+psi <-  sim.pop(psi.start = init,
                 gamma = gamma,
                 beta = beta,
                 alpha = alpha,
                 psi =  array(dim=c(nrep,nspecies,sites,time)),
                 cov.array = f_array(covs),
-                species=T,
-               region = region.psi,
-               region.cov = jas_data$region
+                species = T,
+                region = region.psi,
+                region.cov = jas_data$region
                )
 
 
 
-# predict occupancy state - write out occupancies to save memory
+# predict occupancy state - write out occupancies to save memory (this is all a bit slow)
 dir.create("binary_occupancy")
 for(i in 1:nrep){
   
@@ -198,6 +242,12 @@ s_x_o <- vector()
 s_x_e <- vector()
 e <- 0.0001
 
+
+
+
+# create directory for outputs
+#dir.create("predicted_observed_occupancy")
+
 # observation model
 for(i in 1:nrep){
   
@@ -222,6 +272,9 @@ for(i in 1:nrep){
   sum_rep[[i]] <-data.frame(cbind(y_sum=sum(y),rep=i))
   spe_rep[[i]] <-data.frame(cbind(obs_count= colSums(y),rep=i,snames=names(colSums(y))))
   
+  saveRDS(y,file=paste0("predicted_observed_occupancy/",data,"y_rep_",i,"_",mod,".rds"))
+  
+
   # could look at transitions states (AHM 2 p243)?
   s_x_e[i] <- sum((colSums(y) - colSums(p))^2/(colSums(p)+e)) # chi square discrepancy over species
   s_x_o[i] <- sum((colSums(occ)  - colSums(p))^2/ (colSums(p)+e))
@@ -231,7 +284,183 @@ for(i in 1:nrep){
   
 }
 
+##############################
+# look at predictions in space and time
+# get site id
+site_id <- read.csv("site_id.csv")[2]
+colnames(site_id) <- "site_5km"
 
+
+# get visit info
+visit <- jas_data[[2]]
+visit$Year <- visit$Year+1993
+closure_period <- read.csv("Occ_workflow_V2/date_preparation_1/clsr_per.csv",header=T)[-1]; colnames(closure_period)[2] <- "Year"
+closure_period <- cbind(closure_period,Year.x = rep(seq(1994,2019,2),each=2)) 
+
+# set up output data frame
+y <- readRDS(paste0("predicted_observed_occupancy/",data,"y_rep_",1,"_",mod,".rds"))
+
+# pivot into longer data set
+visit <- left_join(x=visit,y=closure_period,by="Year")
+y_long_rep <- cbind(y,visit[c("site_5km","TP","Year.x")]) %>% 
+              pivot_longer(colnames(y),names_to = "species") 
+
+
+
+# summarize by site and species
+# year
+y_year_total <- y_long_rep %>% group_by(site_5km,Year.x) %>% summarise(total_y = sum(value))
+nr <- nrow(y_year_total)
+y_year_out <- data.frame(matrix(nrow=nr,ncol=nrep+2))
+y_year_out[,1:3] <- y_year_total[,1:3]
+
+# site
+y_site_total <- y_long_rep %>% group_by(site_5km) %>% summarise(total_y = sum(value))
+nr <- nrow(y_site_total)
+y_site_out <- data.frame(matrix(nrow=nr,ncol=nrep+1))
+y_site_out[,1:2] <- y_site_total[,1:2]
+
+# repeat for all repetitions
+for(i in 2:nrep){
+  # set up output data frame
+  y <- readRDS(paste0("predicted_observed_occupancy/",data,"y_rep_",i,"_",mod,".rds"))
+  
+  # pivot into longer data set
+  y_long_rep <- cbind(y,visit[c("site_5km","TP","Year.x")]) %>% pivot_longer(colnames(y),names_to = "species") 
+  
+  # summarize by site and species
+  y_year_out[i+2] <- (y_long_rep %>% group_by(site_5km,Year.x) %>% summarise(total_y = sum(value)))["total_y"]
+  y_site_out[i+1] <- (y_long_rep %>% group_by(site_5km) %>% summarise(total_y = sum(value)))["total_y"]
+}
+
+# summarize the observed values
+obs_y_long <- cbind(occ,visit[c("site_5km","TP","Year.x")]) %>% pivot_longer(colnames(occ),names_to = "species") 
+obs_year_total <- obs_y_long %>% group_by(site_5km,Year.x) %>% summarise(total_y = sum(value))
+obs_year_total$Year.x <- as.character(obs_year_total$Year.x)
+obs_site_total <- obs_y_long %>% group_by(site_5km) %>% summarise(total_y = sum(value)) 
+ 
+
+# set up with a covariate
+# get site id
+site_id <- read.csv("site_id.csv")[2]
+colnames(site_id) <- "site_5km"
+
+# Check NA values!
+# compared predicted with observed distributions
+compared_distributions <- function(cov.frame,x.lab,y.lab,bin.size,year){
+  
+  if(year){
+    obs_cov_join <- obs_year_total %>% left_join(x=.,y= cov.frame,by = c("site_5km","Year.x"))
+    obs_cov_join <- obs_cov_join[obs_cov_join$Year.x!=2018,]
+    obs_cov_tally <- rep(obs_cov_join$value,times=obs_cov_join$total_y)
+  } else {
+    obs_cov_join <- obs_site_total %>% left_join(x=.,y= cov.frame,by = "site_5km")
+    obs_cov_tally <- rep(obs_cov_join$use,obs_cov_join$total_y)
+  }
+
+  # create observed histogram along the covariate
+  obs_histogram <- ggplot() + geom_histogram(aes(x= obs_cov_tally),color="black",alpha = 0.5,bins = bin.size)
+  hist_data <- ggplot_build( obs_histogram)$data[[1]]
+  
+  # join replicated data with covariate information
+  
+  if(year){
+    colnames(y_year_out)[1:2] <-  c("site_5km","Year.x")
+    y_year_out$Year.x <- as.character(y_year_out$Year.x)
+    rep_cov_join <- y_year_out %>% left_join(x=.,y=cov.frame,by =  c("site_5km","Year.x"))
+  } else {
+    colnames(y_site_out)[1] <- "site_5km"
+    rep_cov_join <- y_site_out %>% left_join(x=.,y=cov.frame,by =  c("site_5km"))
+  }
+  rep_count <- data.frame(matrix(ncol = nrep,nrow = bin.size)) 
+  
+  for(i in 1:200){
+    
+    # replicate observations by estimated count
+    if(year){
+      rep_cov_join <-  rep_cov_join[rep_cov_join$Year.x!=2018,] 
+      rep_cov <- rep(rep_cov_join$value,rep_cov_join[,paste0("X",i+2)])
+    } else {
+      rep_cov <- rep(rep_cov_join$use,rep_cov_join[,paste0("X",i+1)])
+    } 
+    
+    # use histogram
+    rep_histogram <- ggplot() + geom_histogram(aes(x=rep_cov),bins=bin.size)
+    hist_data_rep <- ggplot_build(rep_histogram)$data[[1]]
+    
+    # check the bins match from the observed and replicated data
+    if(all(hist_data$x!=hist_data_rep$x)){stop()}
+    rep_count[,i] <- hist_data_rep$y
+  }  
+  
+  # bind with x values
+  # comparative histogram
+  hist_summary_data <- data.frame(summary_f(rep_count),xval=hist_data$x)
+  out <- obs_histogram + geom_point(aes(y=hist_summary_data$mean.x,x=hist_summary_data$xval),color="blue") +
+                  geom_line(aes(y=hist_summary_data$mean.x,x=hist_summary_data$xval),color="blue") + 
+                  geom_errorbar(aes(ymin=hist_summary_data$ql,ymax=hist_summary_data$qu,x=hist_summary_data$xval),color="blue") +
+                  xlab(x.lab) + ylab(y.lab) +
+                  theme( panel.grid.major = element_blank(), 
+                         panel.grid.minor = element_blank(), 
+                         panel.background = element_blank(), 
+                         axis.text.y = element_text(size=10), 
+                         axis.text.x= element_text(size=10), 
+                         axis.title.x= element_text(size=11), 
+                         axis.title.y =element_text(size=11), 
+                         axis.line = element_line(colour = "black")) 
+  print(out)
+  return(list(plot=out,observed_data=hist_data,predicted_data=rep_count))
+}
+
+# aggregated observed values vs predicted values
+covs_observed <- readRDS("covars_wide_bees.rds")
+
+# mean temperature
+cov.frame  <- covs_observed$mean_temp 
+colnames(cov.frame)[2] <- "use"
+colnames(cov.frame)[1] <- "site_5km"  
+mean_temp_pp <- compared_distributions(cov.frame,x.lab = "Spatial Temperature",y.lab = "Observation Count",bin.size = 40,year=F)
+
+# mean risk quotient
+cov.frame = covs_observed$RQsum_M
+colnames(cov.frame)[2] <- "use"
+colnames(cov.frame)[1] <- "site_5km"   
+mean_rqm_pp <- compared_distributions(cov.frame,x.lab = "Spatial Risk Quotient",y.lab = "Observation Count",bin.size = 40,year=F)
+
+# mean agriculture
+cov.frame =  covs_observed$agri
+colnames(cov.frame)[2] <- "use"
+colnames(cov.frame)[1] <- "site_5km"   
+mean_agri_pp <- compared_distributions(cov.frame,x.lab = "Agriculture landcover",y.lab = "Observation Count",bin.size = 40,year=F)
+
+# mean agriculture
+cov.frame =  covs_observed$semi
+colnames(cov.frame)[2] <- "use"
+colnames(cov.frame)[1] <- "site_5km"   
+mean_semi_pp <- compared_distributions(cov.frame,x.lab = "Semi-natural landcover",y.lab = "Observation Count",bin.size = 40,year=F)
+
+# temporal temperature
+cov.frame =  pivot_longer(covs_observed$temp_anom,colnames(covs_observed$temp_anom[-1]),names_to = "Year.x")
+colnames(cov.frame)[1] <- "site_5km"   
+mean_tmpa_pp <- compared_distributions(cov.frame,x.lab = "Temporal Temperature",y.lab = "Observation Count",bin.size = 40,year=T)
+
+# temporal risk quotient
+cov.frame =  pivot_longer(covs_observed$temp_anom,colnames(covs_observed$RQsum_A[-1]),names_to = "Year.x")
+colnames(cov.frame)[1] <- "site_5km"   
+mean_rqa_pp <- compared_distributions(cov.frame,x.lab = "Temporal Risk Quotient",y.lab = "Observation Count",bin.size = 40,year=T)
+
+cov_pp_plot <- ggarrange(mean_temp_pp$plot,
+          mean_tmpa_pp$plot,
+          mean_agri_pp$plot,
+          mean_semi_pp$plot,
+          mean_rqm_pp$plot,
+          mean_rqa_pp$plot,ncol=2,nrow=3)
+
+ggsave(cov_pp_plot,"cov_pp_plot.png")
+
+
+# use a histogram
+##############################
 # look at predicted values vs. real values
 species_p <- mean(s_x_e>s_x_o)
 visit_p <- mean(v_x_e>v_x_o)
@@ -273,7 +502,7 @@ for(i in 1:length(indplots)){
 ggsave(paste0("model_fit/",mod,"_",data,"_species_fit_",i,".png"), indplots[[i]],width=10,height=8)
   
 }
-
+   
 # overall model fit
 sum_p <- ggplot() + geom_histogram(data= sum_rep.
                                    ,aes(x=y_sum),bins =40)+
@@ -456,6 +685,16 @@ psi1 <- sim.pop(psi.start = 0.50,
                 cov.array = f_array(covs),
                 species=F)
 
+sim.pop(psi.start = init,
+        gamma = gamma,
+        beta = beta,
+        alpha = alpha,
+        psi =  array(dim=c(nrep,nspecies,sites,time)),
+        cov.array = f_array(covs),
+        species=T,
+        region = region.psi,
+        region.cov = jas_data$region
+)
 psi2 <- sim.pop(psi.start = 0.50,
                 gamma = gamma,
                 alpha = alpha.phi,
